@@ -1,4 +1,4 @@
-# MARKETPLACE PREMIUM ULTRA FINAL
+# MARKETPLACE PREMIUM ULTRA FINAL v6666.6666
 # python-telegram-bot v20+
 
 import os
@@ -30,7 +30,7 @@ saved_templates = {}
 blacklist = set()
 offer_id = 1000
 
-# ================= FULL MAPA LITER =================
+# ================= MAPA LITER =================
 
 CHAR_MAP = {
 "a":"@","b":"ß","c":"¢","d":"Ð","e":"3","f":"₣","g":"6",
@@ -44,37 +44,33 @@ CHAR_MAP = {
 def encode(text):
     return "".join(CHAR_MAP.get(c.lower(),c.upper()) for c in text)
 
-# ================= EMOJI PRODUKTÓW =================
+# ================= EMOJI =================
 
-PRODUCT_EMOJI = {
+PRODUCT_EMOJI={
 "buch":"🌿","weed":"🌿",
 "mewa":"🕊",
 "polak":"🐟","feta":"🐟",
 "koks":"✉️","kokaina":"✉️","cola":"✉️",
-"crystal":"💎","mefedron":"💎","3cmc":"💎","4cmc":"💎",
-"xanax":"💊",
-"lsd":"🧠","kwas":"🧠",
-"mdma":"🍬",
-"hasz":"🟫",
-"speed":"⚡"
+"crystal":"💎","mefedron":"💎",
+"xanax":"💊","mdma":"🍬","lsd":"🧠","hasz":"🟫","speed":"⚡"
 }
 
-def get_emoji(text):
+def get_emoji(t):
     for k,v in PRODUCT_EMOJI.items():
-        if k in text.lower():
+        if k in t.lower():
             return v
     return "📦"
 
 def now():
     return datetime.now(TZ).strftime("%H:%M")
 
-# ================= RENDER PREMIUM =================
+# ================= RENDER =================
 
-def render_offer(products,user,style):
+def render_offer(products,user):
     global offer_id
-    offer_id += 1
+    offer_id+=1
 
-    items = "\n".join([
+    items="\n".join([
         f"• {get_emoji(p)} {encode(p)}"
         for p in products
     ])
@@ -84,8 +80,7 @@ def render_offer(products,user,style):
 <b>🔥💥🔥 OSTATNIA SZANSA 🔥💥🔥</b>
 <b>████████████████████████</b>
 
-<b>🆔 OFERTA:</b> #{offer_id}
-<b>🕒 CZAS:</b> {now()}
+<b>🆔 #{offer_id}</b> | <b>🕒 {now()}</b>
 
 {items}
 
@@ -97,19 +92,19 @@ def render_offer(products,user,style):
 # ================= START =================
 
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    user = update.effective_user.username.lower()
+    uid=update.effective_user.id
+    user=update.effective_user.username.lower()
 
-    if uid == ADMIN_ID:
+    if uid==ADMIN_ID:
         VENDORS.add(user)
 
-    kb = [
+    kb=[
         [InlineKeyboardButton("➕ NOWA OFERTA",callback_data="new")],
         [InlineKeyboardButton("⚡ SZYBKA OFERTA",callback_data="quick")],
         [InlineKeyboardButton("📂 MOJE SZABLONY",callback_data="templates")]
     ]
 
-    if uid == ADMIN_ID:
+    if uid==ADMIN_ID:
         kb.append([InlineKeyboardButton("🛠 PANEL ADMINA",callback_data="admin")])
 
     await update.message.reply_text(
@@ -117,10 +112,11 @@ async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
-# ================= PANEL ADMINA =================
+# ================= ADMIN PANEL =================
 
-def admin_keyboard():
+def admin_kb():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ DODAJ VENDORA",callback_data="add_vendor")],
         [InlineKeyboardButton("👥 VENDORZY",callback_data="vendors")],
         [InlineKeyboardButton("⛔ BLACKLISTA",callback_data="blacklist")],
         [InlineKeyboardButton("🧹 WYCZYŚĆ TEMAT",callback_data="clean")],
@@ -130,29 +126,32 @@ def admin_keyboard():
 # ================= BUTTONS =================
 
 async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
+    q=update.callback_query
     await q.answer()
 
-    uid = q.from_user.id
-    user = q.from_user.username.lower()
+    uid=q.from_user.id
+    user=q.from_user.username.lower()
 
-    # ADMIN PANEL
-    if q.data == "admin" and uid == ADMIN_ID:
-        await q.message.reply_text("🛠 PANEL ADMINA",reply_markup=admin_keyboard())
+    # ADMIN
+    if q.data=="admin" and uid==ADMIN_ID:
+        await q.message.reply_text("🛠 PANEL ADMINA",reply_markup=admin_kb())
         return
 
-    if q.data == "vendors" and uid == ADMIN_ID:
-        rows = []
-        for v in VENDORS:
-            rows.append([InlineKeyboardButton(v.upper(),callback_data=f"v_{v}")])
+    if q.data=="add_vendor" and uid==ADMIN_ID:
+        context.user_data["add_vendor"]=True
+        await q.message.reply_text("Podaj @username vendora:")
+        return
+
+    if q.data=="vendors" and uid==ADMIN_ID:
+        rows=[[InlineKeyboardButton(v.upper(),callback_data=f"v_{v}")] for v in VENDORS]
         await q.message.reply_text("👥 VENDORZY:",reply_markup=InlineKeyboardMarkup(rows))
         return
 
-    if q.data.startswith("v_") and uid == ADMIN_ID:
-        v = q.data[2:]
-        stats = vendor_stats.get(v,0)
+    if q.data.startswith("v_") and uid==ADMIN_ID:
+        v=q.data[2:]
+        stats=vendor_stats.get(v,0)
 
-        kb = [
+        kb=[
             [InlineKeyboardButton("🗑 USUŃ VENDORA",callback_data=f"del_{v}")],
             [InlineKeyboardButton("⬅ POWRÓT",callback_data="vendors")]
         ]
@@ -163,41 +162,43 @@ async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if q.data.startswith("del_") and uid == ADMIN_ID:
+    if q.data.startswith("del_") and uid==ADMIN_ID:
         VENDORS.discard(q.data[4:])
         await q.message.reply_text("🗑 VENDOR USUNIĘTY")
         return
 
-    if q.data == "blacklist" and uid == ADMIN_ID:
-        context.user_data["add_bl"] = True
+    if q.data=="blacklist" and uid==ADMIN_ID:
+        context.user_data["add_bl"]=True
         await q.message.reply_text("Podaj słowo do blacklisty:")
         return
 
-    if q.data == "clean" and uid == ADMIN_ID:
-        for m in list(last_ad.values()):
-            try:
-                await context.bot.delete_message(GROUP_ID,m)
-            except:
-                pass
-        last_ad.clear()
-        await q.message.reply_text("🧹 TEMAT WYCZYSZCZONY")
+    # QUICK OFFER -> kafelki
+    if q.data=="quick":
+        if user not in VENDORS:
+            await q.message.reply_text("❌ NIE JESTEŚ VENDOREM")
+            return
+
+        rows=[
+            [InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(1,6)],
+            [InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(6,11)]
+        ]
+
+        await q.message.reply_text(
+            "⚡ ILE PRODUKTÓW?",
+            reply_markup=InlineKeyboardMarkup(rows)
+        )
         return
 
-    if q.data == "reset" and uid == ADMIN_ID:
-        daily.clear()
-        await q.message.reply_text("🔄 LIMITY ZRESETOWANE")
+    if q.data.startswith("q"):
+        steps[uid]={"qty":int(q.data[1:]),"items":[]}
+        await q.message.reply_text("Podaj produkt 1")
         return
 
-    # NEW OFFER
-    if q.data == "new":
-        steps[uid] = {"items":[]}
-        await q.message.reply_text("Ile produktów? (1-10)")
-        return
+    # SEND
+    if q.data=="send":
+        ad=render_offer(steps[uid]["items"],user)
 
-    if q.data == "send":
-        ad = render_offer(steps[uid]["items"],user,0)
-
-        msg = await context.bot.send_photo(
+        msg=await context.bot.send_photo(
             GROUP_ID,
             LOGO_URL,
             caption=ad,
@@ -205,8 +206,8 @@ async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
             message_thread_id=TOPIC_ID
         )
 
-        last_ad[uid] = msg.message_id
-        vendor_stats[user] = vendor_stats.get(user,0)+1
+        last_ad[uid]=msg.message_id
+        vendor_stats[user]=vendor_stats.get(user,0)+1
         steps.pop(uid)
 
         await q.message.reply_text("✅ OPUBLIKOWANO")
@@ -215,12 +216,18 @@ async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
 # ================= COLLECT =================
 
 async def collect(update:Update,context:ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    text = update.message.text
+    uid=update.effective_user.id
+    text=update.message.text
 
-    if context.user_data.get("add_bl") and uid == ADMIN_ID:
+    if context.user_data.get("add_vendor") and uid==ADMIN_ID:
+        VENDORS.add(text.replace("@","").lower())
+        context.user_data["add_vendor"]=False
+        await update.message.reply_text("✅ DODANO VENDORA")
+        return
+
+    if context.user_data.get("add_bl") and uid==ADMIN_ID:
         blacklist.add(text.lower())
-        context.user_data["add_bl"] = False
+        context.user_data["add_bl"]=False
         await update.message.reply_text("⛔ DODANO DO BLACKLISTY")
         return
 
@@ -231,21 +238,15 @@ async def collect(update:Update,context:ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ ZABLOKOWANE SŁOWO")
         return
 
-    if "qty" not in steps[uid]:
-        steps[uid]["qty"] = int(text)
-        await update.message.reply_text("Podaj produkt 1")
-        return
-
     steps[uid]["items"].append(text)
 
-    if len(steps[uid]["items"]) < steps[uid]["qty"]:
+    if len(steps[uid]["items"])<steps[uid]["qty"]:
         await update.message.reply_text(
             f"Podaj produkt {len(steps[uid]['items'])+1}"
         )
     else:
-        ad = render_offer(steps[uid]["items"],
-                          update.effective_user.username,
-                          0)
+        ad=render_offer(steps[uid]["items"],
+                        update.effective_user.username)
 
         await update.message.reply_text(
             ad,
@@ -258,12 +259,12 @@ async def collect(update:Update,context:ContextTypes.DEFAULT_TYPE):
 # ================= MAIN =================
 
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app=ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.COMMAND,start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,collect))
-    print("🔥 MARKETPLACE PREMIUM ULTRA ONLINE")
+    print("🔥 MARKETPLACE PREMIUM ULTRA v6666.6666 ONLINE")
     app.run_polling()
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
