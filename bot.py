@@ -1,4 +1,4 @@
-import os, requests
+import os
 from datetime import datetime
 import pytz
 
@@ -9,9 +9,8 @@ from telegram import (
 )
 from telegram.ext import (
     ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
     CallbackQueryHandler,
+    MessageHandler,
     ContextTypes,
     filters
 )
@@ -23,10 +22,10 @@ GROUP_ID = int(os.getenv("GROUP_ID"))
 TOPIC_ID = int(os.getenv("TOPIC_ID"))
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 LOGO_URL = os.getenv("LOGO_URL")
+MAX_DAILY = int(os.getenv("MAX_DAILY", "2"))
 
 VENDORS = os.getenv("VENDOR_NAME","").lower().split(",")
 
-MAX_PER_DAY = 2
 TZ = pytz.timezone("Europe/Warsaw")
 
 # ================= MEMORY =================
@@ -34,154 +33,227 @@ TZ = pytz.timezone("Europe/Warsaw")
 steps = {}
 daily = {}
 last_ad = {}
+blacklist = set()
+offer_id = 1000
 
-# ================= MAP =================
+# ================= UTIL =================
 
-MAP = {
-"a":"@", "e":"3", "i":"!", "o":"0", "s":"$", "b":"8",
-"k":"X", "m":"M", "t":"7", "l":"1", "g":"6", "r":"2",
-"c":"(", "h":"#"
-}
+def now_pl():
+    return datetime.now(TZ).strftime("%H:%M")
 
-def encode(t):
-    return "".join(MAP.get(c,c) for c in t.lower()).upper()
+def build_offer(products, user):
+    global offer_id
+    offer_id += 1
 
-# ================= FORMAT =================
-
-def build_ad(products, user):
-    now = datetime.now(TZ).strftime("%H:%M")
-    items = "\n".join([f"• {encode(p)}" for p in products])
+    items = "\n".join([f"• {p}" for p in products])
 
     return f"""
-🎆🔥🎆  O S T A T N I A  S Z A N S A  🎆🔥🎆
+<b>━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>🛍️ OSTATNIA SZANSA MARKET</b>
+<b>━━━━━━━━━━━━━━━━━━━━━━</b>
 
-╔════════════════════╗
-           🔥 O F F E R T A 🔥
-╚════════════════════╝
+<b>🆔 Oferta:</b> #{offer_id}
+<b>🕒 Godzina:</b> {now_pl()}
+
+<b>📦 OFERTA</b>
 
 {items}
 
-━━━━━━━━━━━━━━━━━━━━
-📩 @{user}
-🕒 {now}
-━━━━━━━━━━━━━━━━━━━━
+<b>━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>📩 Kontakt:</b> @{user}
+<b>━━━━━━━━━━━━━━━━━━━━━━</b>
 """
+
+def contains_blacklist(text):
+    for w in blacklist:
+        if w in text.lower():
+            return True
+    return False
+
+# ================= MAIN MENU =================
+
+def main_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ NOWA OFERTA", callback_data="new_offer")],
+        [InlineKeyboardButton("🛠 PANEL ADMINA", callback_data="admin")]
+    ])
 
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-
-    if not user.username or user.username.lower() not in VENDORS:
-        await update.message.reply_text("❌ Brak dostępu.")
-        return
-
-    kb = [[InlineKeyboardButton(str(i), callback_data=f"q_{i}") for i in range(1,6)],
-          [InlineKeyboardButton(str(i), callback_data=f"q_{i}") for i in range(6,11)]]
-
-    await update.message.reply_text("Ile produktów?", reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_text(
+        "🔥 OSTATNIA SZANSA MARKET 🔥\nWybierz opcję:",
+        reply_markup=main_menu()
+    )
 
 # ================= BUTTONS =================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-
     uid = q.from_user.id
+    username = q.from_user.username
 
-    if q.data.startswith("q_"):
-        steps[uid] = {"qty": int(q.data[2:]), "items":[]}
+    # ===== NEW OFFER =====
+    if q.data == "new_offer":
+        if not username or username.lower() not in VENDORS:
+            await q.message.reply_text("❌ Nie jesteś vendorem.")
+            return
+
+        today = datetime.now(TZ).date()
+        daily.setdefault(uid, {"date":today,"count":0})
+
+        if daily[uid]["date"] != today:
+            daily[uid] = {"date":today,"count":0}
+
+        if daily[uid]["count"] >= MAX_DAILY:
+            await q.message.reply_text("❌ Dzisiejszy limit wykorzystany.")
+            return
+
+        kb = [
+            [InlineKeyboardButton("1",callback_data="q1"),
+             InlineKeyboardButton("2",callback_data="q2"),
+             InlineKeyboardButton("3",callback_data="q3")],
+            [InlineKeyboardButton("4",callback_data="q4"),
+             InlineKeyboardButton("5",callback_data="q5")]
+        ]
+
+        await q.message.reply_text(
+            "Ile produktów?",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+        return
+
+    # ===== QTY =====
+    if q.data.startswith("q"):
+        qty = int(q.data[1:])
+        steps[uid] = {"qty":qty,"items":[]}
         await q.message.reply_text("Podaj produkt 1:")
         return
 
-    if q.data == "yes":
+    # ===== CONFIRM SEND =====
+    if q.data == "send":
         data = steps[uid]
-        ad = build_ad(data["items"], q.from_user.username)
+        ad = build_offer(data["items"], username)
 
-        await context.bot.send_photo(
+        msg = await context.bot.send_photo(
             chat_id=GROUP_ID,
             message_thread_id=TOPIC_ID,
             photo=LOGO_URL,
-            caption=ad
+            caption=ad,
+            parse_mode="HTML"
         )
 
         if uid in last_ad:
             try:
-                await context.bot.delete_message(GROUP_ID, last_ad[uid])
-            except: pass
+                await context.bot.delete_message(GROUP_ID,last_ad[uid])
+            except:
+                pass
 
+        last_ad[uid] = msg.message_id
+        daily[uid]["count"] += 1
         steps.pop(uid)
+
         await q.message.reply_text("✅ Opublikowano.")
+        return
 
-    if q.data == "no":
-        steps.pop(uid)
-        await q.message.reply_text("Anulowano. /start")
+    if q.data == "cancel":
+        steps.pop(uid,None)
+        await q.message.reply_text("❌ Anulowano.")
+        return
 
-# ================= COLLECT =================
+    # ===== ADMIN PANEL =====
+    if q.data == "admin":
+        if uid != ADMIN_ID:
+            return
+
+        kb = [
+            [InlineKeyboardButton("📃 Vendorzy",callback_data="avendors")],
+            [InlineKeyboardButton("⛔ Blacklista",callback_data="ablacklist")],
+            [InlineKeyboardButton("➕ Dodaj słowo",callback_data="addword")],
+            [InlineKeyboardButton("🗑 Wyczyść blacklistę",callback_data="clearbl")]
+        ]
+
+        await q.message.reply_text(
+            "🛠 PANEL ADMINA",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+        return
+
+    if q.data == "avendors":
+        await q.message.reply_text("\n".join(VENDORS))
+        return
+
+    if q.data == "ablacklist":
+        await q.message.reply_text(
+            "BLACKLISTA:\n" + ("\n".join(blacklist) if blacklist else "pusta")
+        )
+        return
+
+    if q.data == "addword":
+        context.user_data["add_blacklist"] = True
+        await q.message.reply_text("Podaj słowo do blacklisty:")
+        return
+
+    if q.data == "clearbl":
+        blacklist.clear()
+        await q.message.reply_text("✅ Blacklista wyczyszczona.")
+        return
+
+# ================= COLLECT TEXT =================
 
 async def collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    text = update.message.text
+
+    # ADMIN ADD BLACKLIST WORD
+    if context.user_data.get("add_blacklist"):
+        blacklist.add(text.lower())
+        context.user_data["add_blacklist"] = False
+        await update.message.reply_text(f"⛔ Dodano: {text}")
+        return
+
     if uid not in steps:
         return
 
-    steps[uid]["items"].append(update.message.text)
+    if contains_blacklist(text):
+        await update.message.reply_text("❌ Niedozwolone słowo.")
+        return
+
+    steps[uid]["items"].append(text)
 
     if len(steps[uid]["items"]) < steps[uid]["qty"]:
         await update.message.reply_text(
             f"Podaj produkt {len(steps[uid]['items'])+1}:"
         )
     else:
-        ad = build_ad(steps[uid]["items"], update.effective_user.username)
+        preview = build_offer(
+            steps[uid]["items"],
+            update.effective_user.username
+        )
 
         kb = [[
-            InlineKeyboardButton("✅ WYŚLIJ", callback_data="yes"),
-            InlineKeyboardButton("❌ ANULUJ", callback_data="no")
+            InlineKeyboardButton("✅ PUBLIKUJ",callback_data="send"),
+            InlineKeyboardButton("❌ ANULUJ",callback_data="cancel")
         ]]
 
         await update.message.reply_text(
-            f"Tak będzie wyglądało Twoje ogłoszenie:\n{ad}",
+            "Tak będzie wyglądała oferta:\n\n"+preview,
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(kb)
         )
-
-# ================= PANEL ADMINA =================
-
-async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    await update.message.reply_text(
-        "🛠 PANEL ADMINA\n\n"
-        "/vendors - lista vendorów\n"
-        "/reload - przeładuj vendorów"
-    )
-
-async def vendors_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    await update.message.reply_text("\n".join(VENDORS))
-
-async def reload_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global VENDORS
-    VENDORS = os.getenv("VENDOR_NAME","").lower().split(",")
-    await update.message.reply_text("♻️ Vendorzy przeładowani.")
 
 # ================= MAIN =================
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("panel", panel))
-    app.add_handler(CommandHandler("vendors", vendors_cmd))
-    app.add_handler(CommandHandler("reload", reload_cmd))
-
+    app.add_handler(MessageHandler(filters.COMMAND, start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, collect))
 
-    print("🔥 OSTATNIA SZANSA BOT ONLINE")
+    print("🔥 MARKETPLACE BOT PREMIUM v99999.0 ONLINE")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-
