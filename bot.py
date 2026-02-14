@@ -1,254 +1,248 @@
 import os
-import random
-import datetime
+import asyncio
+from datetime import datetime, timedelta
+from collections import defaultdict
 from zoneinfo import ZoneInfo
 
 from telegram import (
     Update,
+    InlineKeyboardMarkup,
     InlineKeyboardButton,
-    InlineKeyboardMarkup
 )
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    CallbackQueryHandler,
     MessageHandler,
     ContextTypes,
-    filters
+    filters,
 )
 
-# ================== CONFIG ==================
+# ================== ENV ==================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GROUP_ID = int(os.getenv("GROUP_ID"))
-TOPIC_ID = int(os.getenv("TOPIC_ID"))
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
-VENDORS = set(v.strip().lower() for v in os.getenv("VENDOR_NAME","").split(","))
+VENDOR_NAMES = os.getenv("VENDOR_NAMES", "").split(",")
+LOGO_URL = os.getenv("LOGO_URL")
 
-POLAND = ZoneInfo("Europe/Warsaw")
-LOGO_URL = "https://dump.li/image/get/78f6f8dc8e370504.png"
+GROUP_ID = -1003831965198
+TOPIC_ID = 42
 
-MAX_DAILY = 2
+TIMEZONE = ZoneInfo("Europe/Warsaw")
 
-BLACKLIST = {"dzieci","weapon","fraud","carding","gun"}
+# ================== STORAGE ==================
 
-HASHTAGS = {
-    "weed":"#weed",
-    "buch":"#weed",
-    "koks":"#coke",
-    "kokaina":"#coke",
-    "xanax":"#pills",
-    "mdma":"#pills",
-    "lsd":"#psy"
-}
-
-# ================== MEMORY ==================
-
-daily = {}
-last_offer = {}
-offer_number = 0
+VENDORS = set(v.strip().lower() for v in VENDOR_NAMES if v.strip())
+BLACKLIST = set()
+SILENT_MODE = False
+DAILY_LIMIT = 2
+user_posts = defaultdict(list)
+offer_counter = 0
 
 # ================== STYLE ==================
 
-REPLACE = {
-    "a":"Å","e":"Ë","i":"Ï","o":"Ø","u":"Ü","s":"Ś","c":"Ç"
-}
+EMOJIS = ["🔥","💣","⚡","🚀","💥","🧨","👑","🩸"]
 
-def stylize(t):
-    return "".join(REPLACE.get(c.lower(),c).upper() for c in t)
-
-def pick_icon(name):
-    n=name.lower()
-    if "weed" in n or "buch" in n: return "🌿"
-    if "koks" in n or "kokaina" in n: return "❄️"
-    if "xanax" in n or "mdma" in n: return "💊"
-    if "lsd" in n: return "🧪"
-    return "💎"
+FRAME = "╔════════════════════╗\n" \
+        "║   💎 OSTATNIA SZANSA 💎   ║\n" \
+        "╚════════════════════╝"
 
 # ================== HELPERS ==================
 
-def is_vendor(user):
-    return user.username and user.username.lower() in VENDORS
+def now_pl():
+    return datetime.now(TIMEZONE)
 
-def has_blacklist(text):
-    return any(w in text.lower() for w in BLACKLIST)
+def stylize(text):
+    return text.replace("a","@").replace("e","3").replace("i","!").replace("o","0").replace("s","$")
 
-def build_hashtags(products):
-    tags=set()
-    for p in products:
-        for k,v in HASHTAGS.items():
-            if k in p.lower():
-                tags.add(v)
-    return " ".join(tags)
+def can_post(uid):
+    today = now_pl().date()
+    user_posts[uid] = [d for d in user_posts[uid] if d.date()==today]
+    return len(user_posts[uid]) < DAILY_LIMIT
 
-def build_offer(username, products, number):
-    now = datetime.datetime.now(POLAND).strftime("%H:%M")
+def register_post(uid):
+    user_posts[uid].append(now_pl())
 
-    text = f"""
-💥💥 OSTATNIA SZANSA 💥💥
+def contains_blacklist(text):
+    for w in BLACKLIST:
+        if w in text.lower():
+            return True
+    return False
 
-🆔 #{number}    ⏱ {now}
+def build_offer(products, username):
+    global offer_counter
+    offer_counter += 1
+    emoji = EMOJIS[offer_counter % len(EMOJIS)]
+    time = now_pl().strftime("%H:%M")
 
-🚨 OFERTA 🚨
+    items = "\n".join([f"• {stylize(p.upper())}" for p in products])
 
+    return f"""
+{FRAME}
+
+      {emoji}  OFERTA #{offer_counter}
+        🕒 {time}
+
+━━━━━━━━━━━━━━━━━━━━
+
+{items}
+
+━━━━━━━━━━━━━━━━━━━━
+📩 @{username}  (PW o cenę)
 """
-    for p in products:
-        text += f"{pick_icon(p)} {stylize(p)}\n"
-
-    text += f"""
-
-📩 @{username}
-⚠️ PISZ PO CENĘ
-{build_hashtags(products)}
-"""
-    return text
 
 # ================== START ==================
 
-async def start(update:Update, context:ContextTypes.DEFAULT_TYPE):
-    if not is_vendor(update.message.from_user):
-        await update.message.reply_text("❌ Brak uprawnień.")
-        return
-
-    kb=[[InlineKeyboardButton(str(i),callback_data=f"c{i}")]
-        for i in range(1,11)]
-
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Ile towarów? (1-10)",
-        reply_markup=InlineKeyboardMarkup(kb)
+        "💎 MARKET BOT\n\n"
+        "/new - dodaj ogłoszenie\n"
+        "/panel - admin panel"
     )
 
-# ================== COUNT ==================
+# ================== NEW OFFER FLOW ==================
 
-async def choose(update:Update, context:ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query
-    await q.answer()
-    context.user_data["count"]=int(q.data[1:])
-    context.user_data["products"]=[]
-    await q.message.reply_text("Podaj nazwę towaru:")
-
-# ================== COLLECT ==================
-
-async def collect(update:Update, context:ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
-    if "count" not in context.user_data:
+async def new_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user.username
+    if not user or user.lower() not in VENDORS:
+        await update.message.reply_text("❌ Nie jesteś vendorem.")
         return
 
-    if has_blacklist(update.message.text):
-        await update.message.reply_text("⛔ Zakazany produkt.")
+    if not can_post(update.effective_user.id):
+        await update.message.reply_text("⛔ Limit dzienny wykorzystany.")
         return
 
-    context.user_data["products"].append(update.message.text)
+    context.user_data["products"] = []
+    await update.message.reply_text("Ile produktów? (1-10)")
+    context.user_data["step"] = "count"
 
-    if len(context.user_data["products"]) < context.user_data["count"]:
-        await update.message.reply_text("Następny towar:")
+async def collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if SILENT_MODE:
         return
 
-    preview = build_offer(
-        update.message.from_user.username,
-        context.user_data["products"],
-        "PREVIEW"
-    )
+    step = context.user_data.get("step")
 
-    await update.message.reply_text(
-        "TAK BĘDZIE WYGLĄDAĆ OGŁOSZENIE:\n\n"+preview,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("WYŚLIJ",callback_data="send"),
-             InlineKeyboardButton("ANULUJ",callback_data="cancel")]
-        ])
-    )
-
-# ================== SEND ==================
-
-async def send_offer(update:Update, context:ContextTypes.DEFAULT_TYPE):
-    global offer_number
-    q=update.callback_query
-    await q.answer()
-
-    user=q.from_user.username.lower()
-    today=datetime.date.today()
-
-    if user not in daily or daily[user]["date"]!=today:
-        daily[user]={"date":today,"count":0}
-
-    if daily[user]["count"]>=MAX_DAILY:
-        await q.message.edit_text("⛔ Limit dzienny.")
-        return
-
-    daily[user]["count"]+=1
-    offer_number+=1
-
-    text=build_offer(user,context.user_data["products"],offer_number)
-
-    if user in last_offer:
+    if step == "count":
         try:
-            await context.bot.delete_message(GROUP_ID,last_offer[user])
+            count = int(update.message.text)
+            if count < 1 or count > 10:
+                raise
+            context.user_data["remaining"] = count
+            context.user_data["step"] = "product"
+            await update.message.reply_text("Podaj nazwę produktu:")
         except:
-            pass
+            await update.message.reply_text("Podaj liczbę 1-10")
 
-    msg=await context.bot.send_photo(
-        chat_id=GROUP_ID,
-        message_thread_id=TOPIC_ID,
-        photo=LOGO_URL,
-        caption=text
+    elif step == "product":
+        txt = update.message.text
+
+        if contains_blacklist(txt):
+            await update.message.reply_text("⛔ Zakazane słowo.")
+            return
+
+        context.user_data["products"].append(txt)
+        context.user_data["remaining"] -= 1
+
+        if context.user_data["remaining"] > 0:
+            await update.message.reply_text("Następny produkt:")
+        else:
+            offer = build_offer(
+                context.user_data["products"],
+                update.effective_user.username
+            )
+
+            context.user_data["offer"] = offer
+
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ WYŚLIJ", callback_data="send")],
+                [InlineKeyboardButton("❌ ANULUJ", callback_data="cancel")]
+            ])
+
+            await update.message.reply_photo(
+                photo=LOGO_URL,
+                caption=offer,
+                reply_markup=kb
+            )
+
+# ================== BUTTONS ==================
+
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    if q.data == "send":
+        await context.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=TOPIC_ID,
+            photo=LOGO_URL,
+            caption=context.user_data["offer"]
+        )
+        register_post(q.from_user.id)
+        await q.edit_message_caption("✅ Wysłano")
+        context.user_data.clear()
+
+    if q.data == "cancel":
+        context.user_data.clear()
+        await q.edit_message_caption("❌ Anulowano")
+
+# ================== PANEL ADMINA ==================
+
+async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    await update.message.reply_text(
+        "/addvendor name\n"
+        "/delvendor name\n"
+        "/blacklist word\n"
+        "/silent on/off"
     )
 
-    last_offer[user]=msg.message_id
-    context.user_data.clear()
-
-    try:
-        await q.message.edit_text("✅ Ogłoszenie wysłane.")
-    except:
-        pass
-
-# ================== CANCEL ==================
-
-async def cancel(update:Update, context:ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query
-    await q.answer()
-    context.user_data.clear()
-    try:
-        await q.message.edit_text("Anulowano. /start")
-    except:
-        pass
-
-# ================== ADMIN ==================
-
-async def addvendor(update:Update,context:ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id!=ADMIN_ID:
+async def addvendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
         return
-    if not context.args:
-        return
-    VENDORS.add(context.args[0].lower())
-    await update.message.reply_text("Dodano.")
+    VENDORS.add(" ".join(context.args).lower())
+    await update.message.reply_text("✅ Dodano")
 
-async def delvendor(update:Update,context:ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id!=ADMIN_ID:
+async def delvendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
         return
-    if not context.args:
+    VENDORS.discard(" ".join(context.args).lower())
+    await update.message.reply_text("❌ Usunięto")
+
+async def blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
         return
-    VENDORS.discard(context.args[0].lower())
-    await update.message.reply_text("Usunięto.")
+    BLACKLIST.add(context.args[0].lower())
+    await update.message.reply_text("⛔ Dodano")
+
+async def silent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global SILENT_MODE
+    if update.effective_user.id != ADMIN_ID:
+        return
+    SILENT_MODE = context.args[0] == "on"
+    await update.message.reply_text("OK")
 
 # ================== MAIN ==================
 
 def main():
-    app=ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start",start))
-    app.add_handler(CommandHandler("addvendor",addvendor))
-    app.add_handler(CommandHandler("delvendor",delvendor))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("new", new_offer))
+    app.add_handler(CommandHandler("panel", panel))
+    app.add_handler(CommandHandler("addvendor", addvendor))
+    app.add_handler(CommandHandler("delvendor", delvendor))
+    app.add_handler(CommandHandler("blacklist", blacklist))
+    app.add_handler(CommandHandler("silent", silent))
 
-    app.add_handler(CallbackQueryHandler(choose,pattern="^c"))
-    app.add_handler(CallbackQueryHandler(send_offer,pattern="^send$"))
-    app.add_handler(CallbackQueryHandler(cancel,pattern="^cancel$"))
-
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,collect))
+    app.add_handler(MessageHandler(filters.TEXT, collect))
+    app.add_handler(MessageHandler(filters.PHOTO, lambda u,c: None))
+    app.add_handler(MessageHandler(filters.ALL & filters.ChatType.PRIVATE, collect))
+    app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, lambda u,c: None))
+    app.add_handler(MessageHandler(filters.CallbackQuery, buttons))
 
     print("🔥 MARKET BOT ONLINE 🔥")
     app.run_polling()
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
