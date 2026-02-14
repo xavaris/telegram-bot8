@@ -158,20 +158,56 @@ def admin_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ DODAJ VENDORA",callback_data="add_vendor")],
         [InlineKeyboardButton("👥 VENDORZY",callback_data="vendors")],
-        [InlineKeyboardButton("⛔ BLACKLISTA",callback_data="add_bl")],
+        [InlineKeyboardButton("⛔ DODAJ SŁOWO BLACKLIST",callback_data="blacklist_add")],
+        [InlineKeyboardButton("📛 USUŃ SŁOWO BLACKLIST",callback_data="blacklist_remove")],
         [InlineKeyboardButton("🧹 WYCZYŚĆ TEMAT",callback_data="clean")],
         [InlineKeyboardButton("🔄 RESET LIMITÓW",callback_data="reset")]
-    ])
 
 # ================= BUTTONS =================
 
 async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
+    # RESET TRYBÓW ADMINA PRZY KAŻDYM KLIKNIĘCIU
+context.user_data.pop("add_bl", None)
+context.user_data.pop("add_vendor", None)
     q=update.callback_query
     await q.answer()
     uid=q.from_user.id
     user=q.from_user.username.lower()
 
     # ADMIN
+# ================= BLACKLIST ADD =================
+
+if q.data=="blacklist_add" and uid==ADMIN_ID:
+    context.user_data["add_bl"]=True
+    await q.message.reply_text("✍️ Podaj słowo do DODANIA do blacklisty:")
+    return
+
+# ================= BLACKLIST REMOVE =================
+
+if q.data=="blacklist_remove" and uid==ADMIN_ID:
+    if not blacklist:
+        await q.message.reply_text("Blacklist jest pusta")
+        return
+
+    rows = []
+    for w in blacklist:
+        rows.append([InlineKeyboardButton(f"❌ {w}",callback_data=f"delbl_{w}")])
+
+    rows.append([InlineKeyboardButton("⬅ POWRÓT",callback_data="admin")])
+
+    await q.message.reply_text(
+        "📛 USUŃ SŁOWO Z BLACKLISTY:",
+        reply_markup=InlineKeyboardMarkup(rows)
+    )
+    return
+
+
+if q.data.startswith("delbl_") and uid==ADMIN_ID:
+    word = q.data[6:]
+    blacklist.discard(word)
+    await q.message.reply_text(f"🗑 USUNIĘTO: {word}")
+    return
+
     if q.data=="admin" and uid==ADMIN_ID:
         await q.message.reply_text("🛠 PANEL ADMINA",reply_markup=admin_kb())
         return
@@ -269,6 +305,13 @@ async def collect(update:Update,context:ContextTypes.DEFAULT_TYPE):
     uid=update.effective_user.id
     text=update.message.text
 
+    if context.user_data.get("add_bl") and uid==ADMIN_ID:
+    blacklist.add(text.lower())
+    context.user_data["add_bl"]=False
+    await update.message.reply_text(f"✅ Dodano do blacklisty: {text.lower()}")
+    return
+    
+
     if context.user_data.get("add_vendor") and uid==ADMIN_ID:
         VENDORS.add(text.lower())
         context.user_data["add_vendor"]=False
@@ -313,3 +356,4 @@ def main():
 
 if __name__=="__main__":
     main()
+
