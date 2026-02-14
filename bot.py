@@ -311,18 +311,19 @@ async def collect(update:Update,context:ContextTypes.DEFAULT_TYPE):
     uid=update.effective_user.id
     text=update.message.text
 
-    if context.user_data.get("add_bl") and uid==ADMIN_ID:
+if context.user_data.get("add_bl") and uid == ADMIN_ID:
     blacklist.add(text.lower())
-    context.user_data["add_bl"]=False
-    await update.message.reply_text(f"✅ Dodano do blacklisty: {text.lower()}")
+    context.user_data["add_bl"] = False
+    await update.message.reply_text(
+        f"✅ Dodano do blacklisty: {text.lower()}"
+    )
     return
     
-
-    if context.user_data.get("add_vendor") and uid==ADMIN_ID:
-        VENDORS.add(text.lower())
-        context.user_data["add_vendor"]=False
-        await update.message.reply_text("DODANO")
-        return
+if context.user_data.get("add_vendor") and uid == ADMIN_ID:
+    VENDORS.add(text.lower())
+    context.user_data["add_vendor"] = False
+    await update.message.reply_text("✅ Dodano vendora")
+    return
 
     if context.user_data.get("bl") and uid==ADMIN_ID:
         blacklist.add(text.lower())
@@ -362,6 +363,7 @@ def main():
 
 if __name__=="__main__":
     main()
+
 
 
 
