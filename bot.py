@@ -184,7 +184,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if q.data=="blacklist_add" and uid==ADMIN_ID:
     context.user_data["add_bl"]=True
-    await q.message.reply_text("✍️ Podaj słowo do DODANIA do blacklisty:")
+        await q.message.reply_text("✍️ Podaj słowo do DODANIA do blacklisty:")
     return
 
 # ================= BLACKLIST REMOVE =================
@@ -362,3 +362,4 @@ def main():
 
 if __name__=="__main__":
     main()
+
