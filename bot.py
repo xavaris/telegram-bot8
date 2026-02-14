@@ -23,14 +23,13 @@ TZ = pytz.timezone("Europe/Warsaw")
 steps = {}
 daily = {}
 last_ad = {}
-blacklist = set()
-offer_id = 1000
-
 vendor_stats = {}
+quick_templates = {}   # {vendor:[items]}
+offer_id = 1000
 
 # ================= STYLE =================
 
-CHAR_MAP = {"a":"@","e":"3","i":"1","o":"0","s":"$","t":"7"}
+CHAR_MAP={"a":"@","e":"3","i":"1","o":"0","s":"$","t":"7"}
 
 def encode_name(t):
     return "".join(CHAR_MAP.get(c.lower(),c.upper()) for c in t)
@@ -48,60 +47,82 @@ def get_product_emoji(t):
         if k in t.lower(): return v
     return "📦"
 
-# ================= UTIL =================
+# ================= TIME =================
 
 def now_pl():
     return datetime.now(TZ).strftime("%H:%M")
 
-def build_offer(products,user):
+# ================= 5 VISUAL TEMPLATES =================
+
+def build_offer(products,user,style):
     global offer_id
     offer_id+=1
     items="\n".join([f"• {get_product_emoji(p)} {encode_name(p)}" for p in products])
-    return f"""
-<b>████████████████████</b>
-<b>🔥 OSTATNIA SZANSA 🔥</b>
-<b>████████████████████</b>
 
-<b>🆔 #{offer_id}</b>
-<b>🕒 {now_pl()}</b>
+    if style==1:
+        return f"""
+<b>████████████████</b>
+<b>🔥 OSTATNIA SZANSA 🔥</b>
+<b>████████████████</b>
+
+<b>🆔 #{offer_id}</b> | <b>{now_pl()}</b>
 
 {items}
 
+<b>@{user}</b>
+"""
+
+    if style==2:
+        return f"""
+<b>╔══════════════╗</b>
+<b>⚡ MARKET ⚡</b>
+<b>╚══════════════╝</b>
+
+{items}
+
+<b>📩 @{user}</b>
+"""
+
+    if style==3:
+        return f"""
+<b>🛍 OSTATNIA SZANSA</b>
+
+{items}
+
+<b>Kontakt: @{user}</b>
+"""
+
+    if style==4:
+        return f"""
+<b>━━━━━━━━━━━━━━</b>
+<b>🔥 MARKET 🔥</b>
+<b>━━━━━━━━━━━━━━</b>
+
+{items}
+
+<b>━━━━━━━━━━━━━━</b>
+<b>@{user}</b>
+"""
+
+    if style==5:
+        return f"""
 <b>████████████████████</b>
+<b>💎 PREMIUM MARKET 💎</b>
+<b>████████████████████</b>
+
+{items}
+
 <b>📩 @{user}</b>
 """
 
 # ================= START =================
 
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
-    uid=update.effective_user.id
-    if uid==ADMIN_ID:
-        kb=[[InlineKeyboardButton("➕ NOWA OFERTA",callback_data="new_offer")],
-            [InlineKeyboardButton("🛠 PANEL ADMINA",callback_data="admin")]]
-    else:
-        kb=[[InlineKeyboardButton("➕ NOWA OFERTA",callback_data="new_offer")]]
-
+    kb=[
+        [InlineKeyboardButton("➕ NOWA OFERTA",callback_data="new_offer")],
+        [InlineKeyboardButton("⚡ SZYBKA OFERTA",callback_data="quick_offer")]
+    ]
     await update.message.reply_text("🔥 MARKETPLACE 🔥",reply_markup=InlineKeyboardMarkup(kb))
-
-# ================= ADMIN KEYBOARD =================
-
-def admin_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📃 VENDORZY",callback_data="vendors")],
-        [InlineKeyboardButton("🧹 WYCZYŚĆ TEMAT",callback_data="clean_topic")]
-    ])
-
-def vendors_keyboard():
-    rows=[]
-    row=[]
-    for v in VENDORS:
-        row.append(InlineKeyboardButton(v.upper(),callback_data=f"v_{v}"))
-        if len(row)==2:
-            rows.append(row)
-            row=[]
-    if row: rows.append(row)
-    rows.append([InlineKeyboardButton("⬅ POWRÓT",callback_data="admin")])
-    return InlineKeyboardMarkup(rows)
 
 # ================= BUTTONS =================
 
@@ -109,117 +130,89 @@ async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
     q=update.callback_query
     await q.answer()
     uid=q.from_user.id
-    user=q.from_user.username
+    user=q.from_user.username.lower()
 
-    # ADMIN
-    if q.data=="admin" and uid==ADMIN_ID:
-        await q.message.reply_text("🛠 PANEL ADMINA",reply_markup=admin_keyboard())
-        return
-
-    if q.data=="vendors" and uid==ADMIN_ID:
-        await q.message.reply_text("VENDORZY:",reply_markup=vendors_keyboard())
-        return
-
-    if q.data.startswith("v_") and uid==ADMIN_ID:
-        v=q.data[2:]
-        stats=vendor_stats.get(v,0)
-        kb=[
-            [InlineKeyboardButton("🗑 USUŃ VENDORA",callback_data=f"del_{v}")],
-            [InlineKeyboardButton("⬅ POWRÓT",callback_data="vendors")]
-        ]
-        await q.message.reply_text(
-            f"VENDOR: {v.upper()}\nOFERTY ŁĄCZNIE: {stats}",
-            reply_markup=InlineKeyboardMarkup(kb))
-        return
-
-    if q.data.startswith("del_") and uid==ADMIN_ID:
-        v=q.data[4:]
-        VENDORS.discard(v)
-        await q.message.reply_text(f"USUNIĘTO {v.upper()}")
-        return
-
-    if q.data=="clean_topic" and uid==ADMIN_ID:
-        for m in list(last_ad.values()):
-            try: await context.bot.delete_message(GROUP_ID,m)
-            except: pass
-        last_ad.clear()
-        await q.message.reply_text("TEMAT WYCZYSZCZONY")
-        return
-
-    # NEW OFFER
+    # NEW OFFER → TEMPLATE PICK
     if q.data=="new_offer":
-        if user.lower() not in VENDORS:
-            await q.message.reply_text("❌ NIE JESTEŚ VENDOREM")
-            return
+        kb=[[InlineKeyboardButton(f"SZABLON {i}",callback_data=f"tpl_{i}") for i in range(1,6)]]
+        await q.message.reply_text("WYBIERZ WYGLĄD:",reply_markup=InlineKeyboardMarkup(kb))
+        return
 
-        today=datetime.now(TZ).date()
-        daily.setdefault(uid,{"date":today,"count":0})
-        if daily[uid]["date"]!=today:
-            daily[uid]={"date":today,"count":0}
+    if q.data.startswith("tpl_"):
+        style=int(q.data[-1])
+        steps[uid]={"style":style,"items":[],"qty":None}
+        kb=[[InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(1,6)],
+            [InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(6,11)]]
+        await q.message.reply_text("ILE PRODUKTÓW?",reply_markup=InlineKeyboardMarkup(kb))
+        return
 
-        if daily[uid]["count"]>=MAX_DAILY:
-            await q.message.reply_text("LIMIT DZIŚ")
-            return
-
+    # QUICK OFFER
+    if q.data=="quick_offer":
+        steps[uid]={"style":1,"items":[],"qty":None,"quick":True}
         kb=[[InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(1,6)],
             [InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(6,11)]]
         await q.message.reply_text("ILE PRODUKTÓW?",reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if q.data.startswith("q"):
-        steps[uid]={"qty":int(q.data[1:]),"items":[]}
+        steps[uid]["qty"]=int(q.data[1:])
         await q.message.reply_text("PODAJ PRODUKT 1")
         return
 
-    # EDIT
-    if q.data.startswith("edit_"):
-        idx=int(q.data.split("_")[1])
-        steps[uid]["edit"]=idx
-        await q.message.reply_text(f"PODAJ NOWĄ NAZWĘ DLA {idx+1}")
-        return
-
+    # SEND
     if q.data=="send":
-        ad=build_offer(steps[uid]["items"],user)
+        data=steps[uid]
+        ad=build_offer(data["items"],user,data["style"])
+
         msg=await context.bot.send_photo(
             GROUP_ID,LOGO_URL,
             caption=ad,parse_mode="HTML",
-            message_thread_id=TOPIC_ID)
+            message_thread_id=TOPIC_ID
+        )
 
         last_ad[uid]=msg.message_id
-        daily[uid]["count"]+=1
-        vendor_stats[user.lower()]=vendor_stats.get(user.lower(),0)+1
-        steps.pop(uid)
 
-        await q.message.reply_text("✅ OPUBLIKOWANO\n📊 STATUS: OK")
+        kb=[
+            [InlineKeyboardButton("💾 ZAPISZ JAKO SZYBKA",callback_data="save_quick")],
+            [InlineKeyboardButton("❌ NIE",callback_data="no_save")]
+        ]
+
+        await q.message.reply_text("Zapisać jako szybką ofertę?",reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if q.data=="save_quick":
+        quick_templates[user]=steps[uid]["items"]
+        steps.pop(uid)
+        await q.message.reply_text("✅ ZAPISANO")
+        return
+
+    if q.data=="no_save":
+        steps.pop(uid)
+        await q.message.reply_text("OK")
         return
 
 # ================= COLLECT =================
 
 async def collect(update:Update,context:ContextTypes.DEFAULT_TYPE):
     uid=update.effective_user.id
-    text=update.message.text
-
     if uid not in steps: return
 
-    if "edit" in steps[uid]:
-        i=steps[uid].pop("edit")
-        steps[uid]["items"][i]=text
-    else:
-        steps[uid]["items"].append(text)
+    steps[uid]["items"].append(update.message.text)
 
     if len(steps[uid]["items"])<steps[uid]["qty"]:
         await update.message.reply_text(f"PODAJ PRODUKT {len(steps[uid]['items'])+1}")
     else:
-        rows=[]
-        for i in range(len(steps[uid]["items"])):
-            rows.append([InlineKeyboardButton(f"✏️ EDYTUJ {i+1}",callback_data=f"edit_{i}")])
-        rows.append([
-            InlineKeyboardButton("✅ PUBLIKUJ",callback_data="send")
-        ])
+        ad=build_offer(
+            steps[uid]["items"],
+            update.effective_user.username,
+            steps[uid]["style"]
+        )
+
+        kb=[[InlineKeyboardButton("✅ PUBLIKUJ",callback_data="send")]]
+
         await update.message.reply_text(
-            build_offer(steps[uid]["items"],update.effective_user.username),
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(rows)
+            ad,parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(kb)
         )
 
 # ================= MAIN =================
@@ -229,7 +222,7 @@ def main():
     app.add_handler(MessageHandler(filters.COMMAND,start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,collect))
-    print("🔥 MARKETPLACE ULTRA ONLINE")
+    print("🔥 MARKETPLACE TEMPLATE SYSTEM ONLINE")
     app.run_polling()
 
 if __name__=="__main__":
