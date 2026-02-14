@@ -1,247 +1,177 @@
 import os
 import asyncio
-from datetime import datetime, timedelta
-from collections import defaultdict
-from zoneinfo import ZoneInfo
-
+from datetime import datetime
+import pytz
 from telegram import (
     Update,
-    InlineKeyboardMarkup,
     InlineKeyboardButton,
+    InlineKeyboardMarkup
 )
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
-    filters,
+    filters
 )
 
-# ================== ENV ==================
+# ===================== CONFIG =====================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
-
-VENDOR_NAMES = os.getenv("VENDOR_NAMES", "").split(",")
-LOGO_URL = os.getenv("LOGO_URL")
 
 GROUP_ID = -1003831965198
 TOPIC_ID = 42
 
-TIMEZONE = ZoneInfo("Europe/Warsaw")
+# Vendorzy wpisani w Railway:
+# VENDOR_NAME=nick1,nick2,nick3
+VENDOR_NAMES = os.getenv("VENDOR_NAME", "").lower().split(",")
 
-# ================== STORAGE ==================
+MAX_PER_DAY = 2
 
-VENDORS = set(v.strip().lower() for v in VENDOR_NAMES if v.strip())
-BLACKLIST = set()
-SILENT_MODE = False
-DAILY_LIMIT = 2
-user_posts = defaultdict(list)
-offer_counter = 0
+poland = pytz.timezone("Europe/Warsaw")
 
-# ================== STYLE ==================
+# ===================== MEMORY =====================
 
-EMOJIS = ["🔥","💣","⚡","🚀","💥","🧨","👑","🩸"]
+user_steps = {}
+daily_count = {}
+last_ads = {}
 
-FRAME = "╔════════════════════╗\n" \
-        "║   💎 OSTATNIA SZANSA 💎   ║\n" \
-        "╚════════════════════╝"
+# ===================== MAPA ZAMIANY =====================
 
-# ================== HELPERS ==================
+MAP = {
+    "a":"@", "e":"3", "i":"!", "o":"0", "s":"$", "b":"8",
+    "k":"X", "m":"M", "t":"7", "l":"1", "g":"6", "r":"2",
+    "c":"(", "h":"#"
+}
 
-def now_pl():
-    return datetime.now(TIMEZONE)
+def encode(text):
+    out = ""
+    for c in text.lower():
+        out += MAP.get(c, c)
+    return out.upper()
 
-def stylize(text):
-    return text.replace("a","@").replace("e","3").replace("i","!").replace("o","0").replace("s","$")
+# ===================== FORMAT =====================
 
-def can_post(uid):
-    today = now_pl().date()
-    user_posts[uid] = [d for d in user_posts[uid] if d.date()==today]
-    return len(user_posts[uid]) < DAILY_LIMIT
+FRAMES = [
+"╔════════════════════╗\n{c}\n╚════════════════════╝",
+"┏━━━━━━━━━━━━━━━━━━━━┓\n{c}\n┗━━━━━━━━━━━━━━━━━━━━┛",
+"╭────────────────────╮\n{c}\n╰────────────────────╯"
+]
 
-def register_post(uid):
-    user_posts[uid].append(now_pl())
+EMOJIS = ["🔥","💣","🚀","⚡","💥","👑"]
 
-def contains_blacklist(text):
-    for w in BLACKLIST:
-        if w in text.lower():
-            return True
-    return False
+def build_ad(products, user):
+    emoji = EMOJIS[hash(user)%len(EMOJIS)]
+    frame = FRAMES[hash(user)%len(FRAMES)]
 
-def build_offer(products, username):
-    global offer_counter
-    offer_counter += 1
-    emoji = EMOJIS[offer_counter % len(EMOJIS)]
-    time = now_pl().strftime("%H:%M")
+    now = datetime.now(poland).strftime("%H:%M")
 
-    items = "\n".join([f"• {stylize(p.upper())}" for p in products])
+    items = "\n".join([f"• {encode(p)}" for p in products])
 
-    return f"""
-{FRAME}
-
-      {emoji}  OFERTA #{offer_counter}
-        🕒 {time}
-
-━━━━━━━━━━━━━━━━━━━━
+    body = f"""
+{emoji}  O F F E R T A  {emoji}
 
 {items}
 
-━━━━━━━━━━━━━━━━━━━━
-📩 @{username}  (PW o cenę)
+───────────────
+📩 @{user}
+🕒 {now}
+───────────────
 """
 
-# ================== START ==================
+    return frame.format(c=body.strip())
+
+# ===================== /START =====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "💎 MARKET BOT\n\n"
-        "/new - dodaj ogłoszenie\n"
-        "/panel - admin panel"
-    )
-
-# ================== NEW OFFER FLOW ==================
-
-async def new_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user.username
-    if not user or user.lower() not in VENDORS:
-        await update.message.reply_text("❌ Nie jesteś vendorem.")
+    if not user or user.lower() not in VENDOR_NAMES:
+        await update.message.reply_text("❌ Nie jesteś na liście vendorów.")
         return
 
-    if not can_post(update.effective_user.id):
-        await update.message.reply_text("⛔ Limit dzienny wykorzystany.")
-        return
+    kb = [[InlineKeyboardButton(str(i), callback_data=f"qty_{i}") for i in range(1,6)],
+          [InlineKeyboardButton(str(i), callback_data=f"qty_{i}") for i in range(6,11)]]
 
-    context.user_data["products"] = []
-    await update.message.reply_text("Ile produktów? (1-10)")
-    context.user_data["step"] = "count"
+    await update.message.reply_text("Ile produktów?", reply_markup=InlineKeyboardMarkup(kb))
 
-async def collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if SILENT_MODE:
-        return
-
-    step = context.user_data.get("step")
-
-    if step == "count":
-        try:
-            count = int(update.message.text)
-            if count < 1 or count > 10:
-                raise
-            context.user_data["remaining"] = count
-            context.user_data["step"] = "product"
-            await update.message.reply_text("Podaj nazwę produktu:")
-        except:
-            await update.message.reply_text("Podaj liczbę 1-10")
-
-    elif step == "product":
-        txt = update.message.text
-
-        if contains_blacklist(txt):
-            await update.message.reply_text("⛔ Zakazane słowo.")
-            return
-
-        context.user_data["products"].append(txt)
-        context.user_data["remaining"] -= 1
-
-        if context.user_data["remaining"] > 0:
-            await update.message.reply_text("Następny produkt:")
-        else:
-            offer = build_offer(
-                context.user_data["products"],
-                update.effective_user.username
-            )
-
-            context.user_data["offer"] = offer
-
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ WYŚLIJ", callback_data="send")],
-                [InlineKeyboardButton("❌ ANULUJ", callback_data="cancel")]
-            ])
-
-            await update.message.reply_photo(
-                photo=LOGO_URL,
-                caption=offer,
-                reply_markup=kb
-            )
-
-# ================== BUTTONS ==================
+# ===================== BUTTONS =====================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
-    if q.data == "send":
-        await context.bot.send_photo(
+    if q.data.startswith("qty_"):
+        qty = int(q.data.split("_")[1])
+        user_steps[q.from_user.id] = {"qty":qty, "items":[]}
+        await q.message.reply_text("Podaj nazwę produktu 1:")
+        return
+
+    if q.data == "send_yes":
+        data = user_steps[q.from_user.id]
+        ad = build_ad(data["items"], q.from_user.username)
+
+        msg = await context.bot.send_message(
             chat_id=GROUP_ID,
             message_thread_id=TOPIC_ID,
-            photo=LOGO_URL,
-            caption=context.user_data["offer"]
+            text=ad
         )
-        register_post(q.from_user.id)
-        await q.edit_message_caption("✅ Wysłano")
-        context.user_data.clear()
 
-    if q.data == "cancel":
-        context.user_data.clear()
-        await q.edit_message_caption("❌ Anulowano")
+        if q.from_user.id in last_ads:
+            try:
+                await context.bot.delete_message(GROUP_ID, last_ads[q.from_user.id])
+            except:
+                pass
 
-# ================== PANEL ADMINA ==================
+        last_ads[q.from_user.id] = msg.message_id
 
-async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+        today = datetime.now(poland).date()
+        daily_count.setdefault(q.from_user.id, {"date":today,"count":0})
+
+        daily_count[q.from_user.id]["count"] += 1
+
+        await q.message.reply_text("✅ Opublikowano.")
+        user_steps.pop(q.from_user.id)
+
+    if q.data == "send_no":
+        user_steps.pop(q.from_user.id)
+        await q.message.reply_text("Anulowano. /start")
+
+# ===================== COLLECT TEXT =====================
+
+async def collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if uid not in user_steps:
         return
-    await update.message.reply_text(
-        "/addvendor name\n"
-        "/delvendor name\n"
-        "/blacklist word\n"
-        "/silent on/off"
-    )
 
-async def addvendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    VENDORS.add(" ".join(context.args).lower())
-    await update.message.reply_text("✅ Dodano")
+    data = user_steps[uid]
+    data["items"].append(update.message.text)
 
-async def delvendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    VENDORS.discard(" ".join(context.args).lower())
-    await update.message.reply_text("❌ Usunięto")
+    if len(data["items"]) < data["qty"]:
+        await update.message.reply_text(f"Podaj nazwę produktu {len(data['items'])+1}:")
+    else:
+        ad = build_ad(data["items"], update.effective_user.username)
 
-async def blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    BLACKLIST.add(context.args[0].lower())
-    await update.message.reply_text("⛔ Dodano")
+        kb = [[
+            InlineKeyboardButton("✅ WYŚLIJ", callback_data="send_yes"),
+            InlineKeyboardButton("❌ ANULUJ", callback_data="send_no")
+        ]]
 
-async def silent(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global SILENT_MODE
-    if update.effective_user.id != ADMIN_ID:
-        return
-    SILENT_MODE = context.args[0] == "on"
-    await update.message.reply_text("OK")
+        await update.message.reply_text(
+            f"Tak będzie wyglądało Twoje ogłoszenie:\n\n{ad}",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
 
-# ================== MAIN ==================
+# ===================== MAIN =====================
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("new", new_offer))
-    app.add_handler(CommandHandler("panel", panel))
-    app.add_handler(CommandHandler("addvendor", addvendor))
-    app.add_handler(CommandHandler("delvendor", delvendor))
-    app.add_handler(CommandHandler("blacklist", blacklist))
-    app.add_handler(CommandHandler("silent", silent))
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, collect))
 
-    app.add_handler(MessageHandler(filters.TEXT, collect))
-    app.add_handler(MessageHandler(filters.PHOTO, lambda u,c: None))
-    app.add_handler(MessageHandler(filters.ALL & filters.ChatType.PRIVATE, collect))
-    app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, lambda u,c: None))
-    app.add_handler(MessageHandler(filters.CallbackQuery, buttons))
-
-    print("🔥 MARKET BOT ONLINE 🔥")
+    print("BOT READY")
     app.run_polling()
 
 if __name__ == "__main__":
