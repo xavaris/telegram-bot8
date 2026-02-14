@@ -178,40 +178,38 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     uid = q.from_user.id
     user = (q.from_user.username or "no_username").lower()
-    
-    # ADMIN
-# ================= BLACKLIST ADD =================
 
-if q.data=="blacklist_add" and uid==ADMIN_ID:
-    context.user_data["add_bl"]=True
+    # ================= BLACKLIST ADD =================
+
+    if q.data=="blacklist_add" and uid==ADMIN_ID:
+        context.user_data["add_bl"]=True
         await q.message.reply_text("✍️ Podaj słowo do DODANIA do blacklisty:")
-    return
-
-# ================= BLACKLIST REMOVE =================
-
-if q.data=="blacklist_remove" and uid==ADMIN_ID:
-    if not blacklist:
-        await q.message.reply_text("Blacklist jest pusta")
         return
 
-    rows = []
-    for w in blacklist:
-        rows.append([InlineKeyboardButton(f"❌ {w}",callback_data=f"delbl_{w}")])
+    # ================= BLACKLIST REMOVE =================
 
-    rows.append([InlineKeyboardButton("⬅ POWRÓT",callback_data="admin")])
+    if q.data=="blacklist_remove" and uid==ADMIN_ID:
+        if not blacklist:
+            await q.message.reply_text("Blacklist jest pusta")
+            return
 
-    await q.message.reply_text(
-        "📛 USUŃ SŁOWO Z BLACKLISTY:",
-        reply_markup=InlineKeyboardMarkup(rows)
-    )
-    return
+        rows = []
+        for w in blacklist:
+            rows.append([InlineKeyboardButton(f"❌ {w}",callback_data=f"delbl_{w}")])
 
+        rows.append([InlineKeyboardButton("⬅ POWRÓT",callback_data="admin")])
 
-if q.data.startswith("delbl_") and uid==ADMIN_ID:
-    word = q.data[6:]
-    blacklist.discard(word)
-    await q.message.reply_text(f"🗑 USUNIĘTO: {word}")
-    return
+        await q.message.reply_text(
+            "📛 USUŃ SŁOWO Z BLACKLISTY:",
+            reply_markup=InlineKeyboardMarkup(rows)
+        )
+        return
+
+    if q.data.startswith("delbl_") and uid==ADMIN_ID:
+        word = q.data[6:]
+        blacklist.discard(word)
+        await q.message.reply_text(f"🗑 USUNIĘTO: {word}")
+        return
 
     if q.data=="admin" and uid==ADMIN_ID:
         await q.message.reply_text("🛠 PANEL ADMINA",reply_markup=admin_kb())
@@ -221,7 +219,6 @@ if q.data.startswith("delbl_") and uid==ADMIN_ID:
         context.user_data["add_vendor"]=True
         await q.message.reply_text("Podaj username vendora:")
         return
-
     if q.data=="vendors" and uid==ADMIN_ID:
         rows=[[InlineKeyboardButton(v.upper(),callback_data=f"v_{v}")] for v in VENDORS]
         await q.message.reply_text("VENDORZY:",reply_markup=InlineKeyboardMarkup(rows))
@@ -362,5 +359,6 @@ def main():
 
 if __name__=="__main__":
     main()
+
 
 
