@@ -168,13 +168,17 @@ def admin_kb():
 # ================= BUTTONS =================
 
 async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
+
     # RESET TRYBÓW ADMINA PRZY KAŻDYM KLIKNIĘCIU
-context.user_data.pop("add_bl", None)
-context.user_data.pop("add_vendor", None)
-    q=update.callback_query
+    context.user_data.pop("add_bl", None)
+    context.user_data.pop("add_vendor", None)
+
+    q = update.callback_query
     await q.answer()
-    uid=q.from_user.id
-    user=q.from_user.username.lower()
+
+    uid = q.from_user.id
+    user = q.from_user.username.lower()
+
 
     # ADMIN
 # ================= BLACKLIST ADD =================
@@ -358,6 +362,7 @@ def main():
 
 if __name__=="__main__":
     main()
+
 
 
 
