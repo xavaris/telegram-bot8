@@ -36,6 +36,30 @@ last_ad = {}
 blacklist = set()
 offer_id = 1000
 
+# ================= CLEAN STYLISH MAPPING =================
+
+CHAR_MAP = {
+    "a": "A",
+    "e": "Ξ",
+    "i": "I",
+    "o": "Ø",
+    "s": "$",
+    "b": "B",
+    "u": "V",
+    "c": "C",
+    "h": "H",
+    "k": "K",
+    "m": "M",
+    "w": "W"
+}
+
+def encode_name(text):
+    result = ""
+    for c in text:
+        low = c.lower()
+        result += CHAR_MAP.get(low, c.upper())
+    return result
+
 # ================= UTIL =================
 
 def now_pl():
@@ -45,11 +69,11 @@ def build_offer(products, user):
     global offer_id
     offer_id += 1
 
-    items = "\n".join([f"• {p}" for p in products])
+    items = "\n".join([f"• {encode_name(p)}" for p in products])
 
     return f"""
 <b>━━━━━━━━━━━━━━━━━━━━━━</b>
-<b>🛍️ OSTATNIA SZANSA MARKET</b>
+<b>🛍 OSTATNIA SZANSA MARKET</b>
 <b>━━━━━━━━━━━━━━━━━━━━━━</b>
 
 <b>🆔 Oferta:</b> #{offer_id}
@@ -65,39 +89,44 @@ def build_offer(products, user):
 """
 
 def contains_blacklist(text):
-    for w in blacklist:
-        if w in text.lower():
+    for word in blacklist:
+        if word in text.lower():
             return True
     return False
-
-# ================= MAIN MENU =================
-
-def main_menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ NOWA OFERTA", callback_data="new_offer")],
-        [InlineKeyboardButton("🛠 PANEL ADMINA", callback_data="admin")]
-    ])
 
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+
+    if uid == ADMIN_ID:
+        kb = [
+            [InlineKeyboardButton("➕ NOWA OFERTA", callback_data="new_offer")],
+            [InlineKeyboardButton("🛠 PANEL ADMINA", callback_data="admin")]
+        ]
+    else:
+        kb = [
+            [InlineKeyboardButton("➕ NOWA OFERTA", callback_data="new_offer")]
+        ]
+
     await update.message.reply_text(
-        "🔥 OSTATNIA SZANSA MARKET 🔥\nWybierz opcję:",
-        reply_markup=main_menu()
+        "🔥 WITAJ W MARKETPLACE 🔥",
+        reply_markup=InlineKeyboardMarkup(kb)
     )
 
-# ================= BUTTONS =================
+# ================= BUTTON HANDLER =================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+
     uid = q.from_user.id
     username = q.from_user.username
 
     # ===== NEW OFFER =====
     if q.data == "new_offer":
         if not username or username.lower() not in VENDORS:
-            await q.message.reply_text("❌ Nie jesteś vendorem.")
+            await q.message.reply_text("❌ Nie jesteś na liście vendorów.")
             return
 
         today = datetime.now(TZ).date()
@@ -111,15 +140,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         kb = [
-            [InlineKeyboardButton("1",callback_data="q1"),
-             InlineKeyboardButton("2",callback_data="q2"),
-             InlineKeyboardButton("3",callback_data="q3")],
-            [InlineKeyboardButton("4",callback_data="q4"),
-             InlineKeyboardButton("5",callback_data="q5")]
+            [InlineKeyboardButton(str(i), callback_data=f"q{i}") for i in range(1,6)],
+            [InlineKeyboardButton(str(i), callback_data=f"q{i}") for i in range(6,11)]
         ]
 
         await q.message.reply_text(
-            "Ile produktów?",
+            "Ile produktów chcesz dodać?",
             reply_markup=InlineKeyboardMarkup(kb)
         )
         return
@@ -131,7 +157,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.message.reply_text("Podaj produkt 1:")
         return
 
-    # ===== CONFIRM SEND =====
+    # ===== SEND =====
     if q.data == "send":
         data = steps[uid]
         ad = build_offer(data["items"], username)
@@ -146,7 +172,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if uid in last_ad:
             try:
-                await context.bot.delete_message(GROUP_ID,last_ad[uid])
+                await context.bot.delete_message(GROUP_ID, last_ad[uid])
             except:
                 pass
 
@@ -154,24 +180,21 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         daily[uid]["count"] += 1
         steps.pop(uid)
 
-        await q.message.reply_text("✅ Opublikowano.")
+        await q.message.reply_text("✅ Oferta opublikowana.")
         return
 
     if q.data == "cancel":
-        steps.pop(uid,None)
+        steps.pop(uid, None)
         await q.message.reply_text("❌ Anulowano.")
         return
 
     # ===== ADMIN PANEL =====
-    if q.data == "admin":
-        if uid != ADMIN_ID:
-            return
-
+    if q.data == "admin" and uid == ADMIN_ID:
         kb = [
-            [InlineKeyboardButton("📃 Vendorzy",callback_data="avendors")],
-            [InlineKeyboardButton("⛔ Blacklista",callback_data="ablacklist")],
-            [InlineKeyboardButton("➕ Dodaj słowo",callback_data="addword")],
-            [InlineKeyboardButton("🗑 Wyczyść blacklistę",callback_data="clearbl")]
+            [InlineKeyboardButton("📃 Lista Vendorów", callback_data="avendors")],
+            [InlineKeyboardButton("⛔ Pokaż Blacklistę", callback_data="showbl")],
+            [InlineKeyboardButton("➕ Dodaj Słowo", callback_data="addbl")],
+            [InlineKeyboardButton("🗑 Wyczyść Blacklistę", callback_data="clearbl")]
         ]
 
         await q.message.reply_text(
@@ -180,34 +203,34 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if q.data == "avendors":
+    if q.data == "avendors" and uid == ADMIN_ID:
         await q.message.reply_text("\n".join(VENDORS))
         return
 
-    if q.data == "ablacklist":
+    if q.data == "showbl" and uid == ADMIN_ID:
         await q.message.reply_text(
-            "BLACKLISTA:\n" + ("\n".join(blacklist) if blacklist else "pusta")
+            "Blacklista:\n" + ("\n".join(blacklist) if blacklist else "pusta")
         )
         return
 
-    if q.data == "addword":
+    if q.data == "addbl" and uid == ADMIN_ID:
         context.user_data["add_blacklist"] = True
         await q.message.reply_text("Podaj słowo do blacklisty:")
         return
 
-    if q.data == "clearbl":
+    if q.data == "clearbl" and uid == ADMIN_ID:
         blacklist.clear()
-        await q.message.reply_text("✅ Blacklista wyczyszczona.")
+        await q.message.reply_text("Blacklista wyczyszczona.")
         return
 
-# ================= COLLECT TEXT =================
+# ================= TEXT COLLECT =================
 
 async def collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
 
-    # ADMIN ADD BLACKLIST WORD
-    if context.user_data.get("add_blacklist"):
+    # ADMIN ADD BLACKLIST
+    if context.user_data.get("add_blacklist") and uid == ADMIN_ID:
         blacklist.add(text.lower())
         context.user_data["add_blacklist"] = False
         await update.message.reply_text(f"⛔ Dodano: {text}")
@@ -217,7 +240,7 @@ async def collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if contains_blacklist(text):
-        await update.message.reply_text("❌ Niedozwolone słowo.")
+        await update.message.reply_text("❌ Produkt zawiera niedozwolone słowo.")
         return
 
     steps[uid]["items"].append(text)
@@ -238,7 +261,7 @@ async def collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]]
 
         await update.message.reply_text(
-            "Tak będzie wyglądała oferta:\n\n"+preview,
+            "Tak będzie wyglądać oferta:\n\n"+preview,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(kb)
         )
@@ -252,7 +275,7 @@ def main():
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, collect))
 
-    print("🔥 MARKETPLACE BOT PREMIUM v99999.0 ONLINE")
+    print("🔥 MARKETPLACE PREMIUM FINAL ONLINE")
     app.run_polling()
 
 if __name__ == "__main__":
