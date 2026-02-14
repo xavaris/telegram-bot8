@@ -1,4 +1,4 @@
-import os
+import os 
 from datetime import datetime
 import pytz
 
@@ -24,7 +24,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID"))
 LOGO_URL = os.getenv("LOGO_URL")
 MAX_DAILY = int(os.getenv("MAX_DAILY", "2"))
 
-VENDORS = set(os.getenv("VENDOR_NAME","").lower().split(","))
+VENDORS = os.getenv("VENDOR_NAME","").lower().split(",")
 
 TZ = pytz.timezone("Europe/Warsaw")
 
@@ -39,13 +39,18 @@ offer_id = 1000
 # ================= STYLING MAP =================
 
 CHAR_MAP = {
-    "a":"@","e":"3","i":"1","o":"0","s":"$","t":"7"
+    "a":"@","b":"В","c":"(","d":"D","e":"3","f":"F","g":"G",
+    "h":"H","i":"1","j":"J","k":"K","l":"L","m":"M","n":"N",
+    "o":"0","p":"P","q":"Q","r":"R","s":"$","t":"7",
+    "u":"Ü","v":"V","w":"W","x":"X","y":"Y","z":"Z",
+    "ą":"@","ć":"C","ę":"3","ł":"L","ń":"N",
+    "ó":"0","ś":"$","ż":"Z","ź":"Z"
 }
 
 def encode_name(text):
     return "".join(CHAR_MAP.get(c.lower(), c.upper()) for c in text)
 
-# ================= PRODUCT EMOJI (opcjonalne) =================
+# ================= PRODUCT EMOJI =================
 
 PRODUCT_EMOJI = {
     "buch":"🌿","weed":"🌿",
@@ -53,6 +58,11 @@ PRODUCT_EMOJI = {
     "polak":"🐟","feta":"🐟",
     "koks":"✉️","kokaina":"✉️","cola":"✉️",
     "crystal":"💎","mefedron":"💎","3cmc":"💎","4cmc":"💎",
+    "xanax":"💊",
+    "lsd":"🧠","kwas":"🧠",
+    "mdma":"🍬",
+    "hasz":"🟫",
+    "speed":"⚡"
 }
 
 def get_product_emoji(text):
@@ -76,20 +86,20 @@ def build_offer(products, user):
     ])
 
     return f"""
-<b>━━━━━━━━━━━━━━━━━━━━━━</b>
-<b>🛍 MARKETPLACE</b>
-<b>━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>████████████████████████</b>
+<b>🔥💥🔥 OSTATNIA SZANSA MARKET 🔥💥🔥</b>
+<b>████████████████████████</b>
 
-<b>🆔 Oferta:</b> #{offer_id}
-<b>🕒 Godzina:</b> {now_pl()}
+<b>🆔 OFERTA:</b> #{offer_id}
+<b>🕒 GODZINA:</b> {now_pl()}
 
 <b>📦 OFERTA</b>
 
 {items}
 
-<b>━━━━━━━━━━━━━━━━━━━━━━</b>
-<b>📩 Kontakt:</b> @{user}
-<b>━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>████████████████████████</b>
+<b>📩 @{user}</b>
+<b>████████████████████████</b>
 """
 
 def contains_blacklist(text):
@@ -113,20 +123,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
-# ================= ADMIN PANEL =================
-
-def vendor_keyboard():
-    rows = []
-    row = []
-    for v in VENDORS:
-        row.append(InlineKeyboardButton(v, callback_data="noop"))
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
-    return InlineKeyboardMarkup(rows)
-
 # ================= BUTTONS =================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,29 +135,30 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ===== ADMIN PANEL =====
     if q.data == "admin" and uid == ADMIN_ID:
         kb = [
-            [InlineKeyboardButton("👥 Vendorzy", callback_data="show_vendors")],
-            [InlineKeyboardButton("➕ Dodaj Vendora", callback_data="add_vendor")],
-            [InlineKeyboardButton("➖ Usuń Vendora", callback_data="remove_vendor")],
+            [InlineKeyboardButton("📃 Vendorzy", callback_data="vendors")],
             [InlineKeyboardButton("⛔ Blacklista", callback_data="show_bl")],
-            [InlineKeyboardButton("➕ Dodaj słowo BL", callback_data="add_bl")],
-            [InlineKeyboardButton("🗑 Wyczyść BL", callback_data="clear_bl")],
-            [InlineKeyboardButton("🔄 Reset limitów", callback_data="reset_limits")]
+            [InlineKeyboardButton("➕ Dodaj słowo", callback_data="add_bl")],
+            [InlineKeyboardButton("🗑 Wyczyść blacklistę", callback_data="clear_bl")],
+            [InlineKeyboardButton("🔄 Reset limitów", callback_data="reset_limits")],
+            [InlineKeyboardButton("🧹 WYCZYŚĆ TEMAT", callback_data="clean_topic")]
         ]
         await q.message.reply_text("🛠 PANEL ADMINA", reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    if q.data == "show_vendors" and uid == ADMIN_ID:
-        await q.message.reply_text("Aktualni vendorzy:", reply_markup=vendor_keyboard())
+    if q.data == "clean_topic" and uid == ADMIN_ID:
+        removed = 0
+        for msg_id in list(last_ad.values()):
+            try:
+                await context.bot.delete_message(GROUP_ID, msg_id)
+                removed += 1
+            except:
+                pass
+        last_ad.clear()
+        await q.message.reply_text(f"🧹 USUNIĘTO {removed} OGŁOSZEŃ")
         return
 
-    if q.data == "add_vendor" and uid == ADMIN_ID:
-        context.user_data["add_vendor"] = True
-        await q.message.reply_text("Podaj @username vendora:")
-        return
-
-    if q.data == "remove_vendor" and uid == ADMIN_ID:
-        context.user_data["remove_vendor"] = True
-        await q.message.reply_text("Podaj @username vendora do usunięcia:")
+    if q.data == "vendors" and uid == ADMIN_ID:
+        await q.message.reply_text("\n".join(VENDORS))
         return
 
     if q.data == "show_bl" and uid == ADMIN_ID:
@@ -175,12 +172,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if q.data == "clear_bl" and uid == ADMIN_ID:
         blacklist.clear()
-        await q.message.reply_text("Blacklista wyczyszczona.")
+        await q.message.reply_text("✅ WYCZYSZCZONO")
         return
 
     if q.data == "reset_limits" and uid == ADMIN_ID:
         daily.clear()
-        await q.message.reply_text("Limity zresetowane.")
+        await q.message.reply_text("✅ LIMITY ZRESETOWANE")
         return
 
     # ===== NEW OFFER =====
@@ -203,6 +200,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(str(i), callback_data=f"q{i}") for i in range(1,6)],
             [InlineKeyboardButton(str(i), callback_data=f"q{i}") for i in range(6,11)]
         ]
+
         await q.message.reply_text("Ile produktów?", reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -232,7 +230,13 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         daily[uid]["count"] += 1
         steps.pop(uid)
 
-        await q.message.reply_text("✅ Opublikowano")
+        await q.message.reply_text("✅ OPUBLIKOWANO")
+        return
+
+    if q.data == "cancel":
+        steps.pop(uid,None)
+        await q.message.reply_text("❌ ANULOWANO")
+        return
 
 # ================= COLLECT =================
 
@@ -243,19 +247,7 @@ async def collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("add_blacklist") and uid == ADMIN_ID:
         blacklist.add(text.lower())
         context.user_data["add_blacklist"] = False
-        await update.message.reply_text("Dodano do blacklisty.")
-        return
-
-    if context.user_data.get("add_vendor") and uid == ADMIN_ID:
-        VENDORS.add(text.replace("@","").lower())
-        context.user_data["add_vendor"] = False
-        await update.message.reply_text("Vendor dodany.")
-        return
-
-    if context.user_data.get("remove_vendor") and uid == ADMIN_ID:
-        VENDORS.discard(text.replace("@","").lower())
-        context.user_data["remove_vendor"] = False
-        await update.message.reply_text("Vendor usunięty.")
+        await update.message.reply_text("Dodano.")
         return
 
     if uid not in steps:
@@ -290,7 +282,7 @@ def main():
     app.add_handler(MessageHandler(filters.COMMAND, start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, collect))
-    print("🔥 MARKETPLACE PREMIUM vULTRA ONLINE")
+    print("🔥 MARKETPLACE PREMIUM AGGRESSIVE ONLINE")
     app.run_polling()
 
 if __name__ == "__main__":
