@@ -307,19 +307,19 @@ async def collect(update:Update,context:ContextTypes.DEFAULT_TYPE):
     uid=update.effective_user.id
     text=update.message.text
 
-if context.user_data.get("add_bl") and uid == ADMIN_ID:
-    blacklist.add(text.lower())
-    context.user_data["add_bl"] = False
-    await update.message.reply_text(
-        f"✅ Dodano do blacklisty: {text.lower()}"
-    )
-    return
-    
-if context.user_data.get("add_vendor") and uid == ADMIN_ID:
-    VENDORS.add(text.lower())
-    context.user_data["add_vendor"] = False
-    await update.message.reply_text("✅ Dodano vendora")
-    return
+    if context.user_data.get("add_bl") and uid == ADMIN_ID:
+        blacklist.add(text.lower())
+        context.user_data["add_bl"] = False
+        await update.message.reply_text(
+            f"✅ Dodano do blacklisty: {text.lower()}"
+        )
+        return
+        
+    if context.user_data.get("add_vendor") and uid == ADMIN_ID:
+        VENDORS.add(text.lower())
+        context.user_data["add_vendor"] = False
+        await update.message.reply_text("✅ Dodano vendora")
+        return
 
     if context.user_data.get("bl") and uid==ADMIN_ID:
         blacklist.add(text.lower())
@@ -327,7 +327,8 @@ if context.user_data.get("add_vendor") and uid == ADMIN_ID:
         await update.message.reply_text("DODANO DO BLACKLISTY")
         return
 
-    if uid not in steps: return
+    if uid not in steps:
+        return
 
     if any(w in text.lower() for w in blacklist):
         await update.message.reply_text("❌ ZABLOKOWANE SŁOWO")
@@ -341,11 +342,23 @@ if context.user_data.get("add_vendor") and uid == ADMIN_ID:
     steps[uid]["items"].append(text)
 
     if len(steps[uid]["items"])<steps[uid]["qty"]:
-        await update.message.reply_text(f"PODAJ PRODUKT {len(steps[uid]['items'])+1}")
+        await update.message.reply_text(
+            f"PODAJ PRODUKT {len(steps[uid]['items'])+1}"
+        )
     else:
-        ad=render(steps[uid]["items"],update.effective_user.username,steps[uid]["style"])
-        await update.message.reply_text(ad,parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ PUBLIKUJ",callback_data="send")]]))
+        ad=render(
+            steps[uid]["items"],
+            update.effective_user.username,
+            steps[uid]["style"]
+        )
+
+        await update.message.reply_text(
+            ad,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("✅ PUBLIKUJ",callback_data="send")]]
+            )
+        )
 
 # ================= MAIN =================
 
@@ -359,6 +372,7 @@ def main():
 
 if __name__=="__main__":
     main()
+
 
 
 
