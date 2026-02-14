@@ -179,191 +179,186 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = q.from_user.id
     user = (q.from_user.username or "no_username").lower()
 
-    # ================= ADMIN PANEL =================
+    # ADMIN
+# ================= BLACKLIST ADD =================
 
-    if q.data == "admin" and uid == ADMIN_ID:
-        await q.message.reply_text("🛠 PANEL ADMINA", reply_markup=admin_kb())
+if q.data=="blacklist_add" and uid==ADMIN_ID:
+    context.user_data["add_bl"]=True
+    await q.message.reply_text("✍️ Podaj słowo do DODANIA do blacklisty:")
+    return
+
+# ================= BLACKLIST REMOVE =================
+
+if q.data=="blacklist_remove" and uid==ADMIN_ID:
+    if not blacklist:
+        await q.message.reply_text("Blacklist jest pusta")
         return
 
-    # ---------- BLACKLIST ADD ----------
-    if q.data == "blacklist_add" and uid == ADMIN_ID:
-        context.user_data["add_bl"] = True
-        await q.message.reply_text("✍️ Podaj słowo do DODANIA do blacklisty:")
+    rows = []
+    for w in blacklist:
+        rows.append([InlineKeyboardButton(f"❌ {w}",callback_data=f"delbl_{w}")])
+
+    rows.append([InlineKeyboardButton("⬅ POWRÓT",callback_data="admin")])
+
+    await q.message.reply_text(
+        "📛 USUŃ SŁOWO Z BLACKLISTY:",
+        reply_markup=InlineKeyboardMarkup(rows)
+    )
+    return
+
+
+if q.data.startswith("delbl_") and uid==ADMIN_ID:
+    word = q.data[6:]
+    blacklist.discard(word)
+    await q.message.reply_text(f"🗑 USUNIĘTO: {word}")
+    return
+
+    if q.data=="admin" and uid==ADMIN_ID:
+        await q.message.reply_text("🛠 PANEL ADMINA",reply_markup=admin_kb())
         return
 
-    # ---------- BLACKLIST REMOVE ----------
-    if q.data == "blacklist_remove" and uid == ADMIN_ID:
-
-        if not blacklist:
-            await q.message.reply_text("Blacklist jest pusta")
-            return
-
-        rows = []
-        for w in blacklist:
-            rows.append(
-                [InlineKeyboardButton(f"❌ {w}", callback_data=f"delbl_{w}")]
-            )
-
-        rows.append([InlineKeyboardButton("⬅ POWRÓT", callback_data="admin")])
-
-        await q.message.reply_text(
-            "📛 USUŃ SŁOWO Z BLACKLISTY:",
-            reply_markup=InlineKeyboardMarkup(rows)
-        )
-        return
-
-    if q.data.startswith("delbl_") and uid == ADMIN_ID:
-        word = q.data[6:]
-        blacklist.discard(word)
-        await q.message.reply_text(f"🗑 USUNIĘTO: {word}")
-        return
-
-    # ---------- ADD VENDOR ----------
-    if q.data == "add_vendor" and uid == ADMIN_ID:
-        context.user_data["add_vendor"] = True
+    if q.data=="add_vendor" and uid==ADMIN_ID:
+        context.user_data["add_vendor"]=True
         await q.message.reply_text("Podaj username vendora:")
         return
 
-    # ---------- VENDOR LIST ----------
-    if q.data == "vendors" and uid == ADMIN_ID:
-        rows = [[InlineKeyboardButton(v.upper(), callback_data=f"v_{v}")]
-                for v in VENDORS]
-        await q.message.reply_text("VENDORZY:", reply_markup=InlineKeyboardMarkup(rows))
+    if q.data=="vendors" and uid==ADMIN_ID:
+        rows=[[InlineKeyboardButton(v.upper(),callback_data=f"v_{v}")] for v in VENDORS]
+        await q.message.reply_text("VENDORZY:",reply_markup=InlineKeyboardMarkup(rows))
         return
 
-    if q.data.startswith("v_") and uid == ADMIN_ID:
-        v = q.data[2:]
-        kb = [
-            [InlineKeyboardButton("🗑 USUŃ", callback_data=f"del_{v}")],
-            [InlineKeyboardButton("⬅ POWRÓT", callback_data="vendors")]
+    if q.data.startswith("v_") and uid==ADMIN_ID:
+        v=q.data[2:]
+        kb=[
+            [InlineKeyboardButton("🗑 USUŃ",callback_data=f"del_{v}")],
+            [InlineKeyboardButton("⬅ POWRÓT",callback_data="vendors")]
         ]
-        await q.message.reply_text(
-            f"{v.upper()}\nOFERTY: {vendor_stats.get(v,0)}",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+        await q.message.reply_text(f"{v.upper()}\nOFERTY: {vendor_stats.get(v,0)}",reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    if q.data.startswith("del_") and uid == ADMIN_ID:
+    if q.data.startswith("del_") and uid==ADMIN_ID:
         VENDORS.discard(q.data[4:])
         await q.message.reply_text("USUNIĘTO")
         return
 
-    # ================= QUICK OFFER =================
-
-    if q.data == "quick":
-
-        rows = [
-            [InlineKeyboardButton(str(i), callback_data=f"q{i}") for i in range(1,6)],
-            [InlineKeyboardButton(str(i), callback_data=f"q{i}") for i in range(6,11)]
-        ]
-
-        await q.message.reply_text(
-            "⚡ ILE PRODUKTÓW?",
-            reply_markup=InlineKeyboardMarkup(rows)
-        )
+    if q.data=="add_bl" and uid==ADMIN_ID:
+        context.user_data["bl"]=True
+        await q.message.reply_text("Podaj słowo:")
         return
 
-    # ================= NEW OFFER =================
-
-    if q.data == "new":
-
-        rows = [
-            [InlineKeyboardButton(f"SZABLON {i}", callback_data=f"tpl_{i}")]
-            for i in range(1,6)
+    # QUICK
+    if q.data=="quick":
+        rows=[
+            [InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(1,6)],
+            [InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(6,11)]
         ]
+        await q.message.reply_text("ILE PRODUKTÓW?",reply_markup=InlineKeyboardMarkup(rows))
+        return
 
-        await q.message.reply_text(
-            "WYBIERZ SZABLON:",
-            reply_markup=InlineKeyboardMarkup(rows)
-        )
+    # NEW OFFER
+    if q.data=="new":
+        rows=[[InlineKeyboardButton(f"SZABLON {i}",callback_data=f"tpl_{i}")] for i in range(1,6)]
+        await q.message.reply_text("WYBIERZ SZABLON:",reply_markup=InlineKeyboardMarkup(rows))
         return
 
     if q.data.startswith("tpl_"):
-
-        style = int(q.data[-1])
-        steps[uid] = {"style": style, "items": []}
-
-        preview = render(["BUCH", "KOKS"], "preview", style)
-
-        await q.message.reply_text(
-            preview,
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("DALEJ", callback_data="qty")]]
-            )
-        )
+        style=int(q.data[-1])
+        steps[uid]={"style":style,"items":[]}
+        preview=render(["BUCH","KOKS"],"preview",style)
+        await q.message.reply_text(preview,parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("DALEJ",callback_data="qty")]]))
         return
 
-    if q.data == "qty":
+    if q.data=="qty":
         await q.message.reply_text("ILE PRODUKTÓW? (1-10)")
         return
 
     if q.data.startswith("q"):
-        steps[uid] = {
-            "style": 0,
-            "qty": int(q.data[1:]),
-            "items": []
-        }
+        steps[uid]={"style":0,"qty":int(q.data[1:]),"items":[]}
         await q.message.reply_text("PODAJ PRODUKT 1")
         return
 
-    # ================= SEND =================
-
-    if q.data == "send":
-
-        ad = render(steps[uid]["items"], user, steps[uid]["style"])
-
-        await context.bot.send_photo(
-            GROUP_ID,
-            LOGO_URL,
-            caption=ad,
-            parse_mode="HTML",
-            message_thread_id=TOPIC_ID
-        )
-
-        vendor_stats[user] = vendor_stats.get(user, 0) + 1
-
-        await q.message.reply_text(
-            "OPUBLIKOWANO\nZAPISAĆ JAKO SZABLON?",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("💾 ZAPISZ", callback_data="save")]]
-            )
-        )
+    if q.data=="send":
+        ad=render(steps[uid]["items"],user,steps[uid]["style"])
+        await context.bot.send_photo(GROUP_ID,LOGO_URL,caption=ad,parse_mode="HTML",message_thread_id=TOPIC_ID)
+        vendor_stats[user]=vendor_stats.get(user,0)+1
+        await q.message.reply_text("OPUBLIKOWANO\nZAPISAĆ JAKO SZABLON?",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💾 ZAPISZ",callback_data="save")]]))
         return
 
-    if q.data == "save":
-
-        saved_templates.setdefault(user, []).append(
-            steps[uid]["items"]
-        )
-
+    if q.data=="save":
+        saved_templates.setdefault(user,[]).append(steps[uid]["items"])
         steps.pop(uid)
         await q.message.reply_text("ZAPISANO")
         return
 
-    if q.data == "mytpl":
-
-        rows = [
-            [InlineKeyboardButton(f"SZABLON {i+1}", callback_data=f"use_{i}")]
-            for i in range(len(saved_templates.get(user, [])))
-        ]
-
-        await q.message.reply_text(
-            "TWOJE SZABLONY:",
-            reply_markup=InlineKeyboardMarkup(rows)
-        )
+    if q.data=="mytpl":
+        rows=[[InlineKeyboardButton(f"SZABLON {i+1}",callback_data=f"use_{i}")]
+              for i in range(len(saved_templates.get(user,[])))]
+        await q.message.reply_text("TWOJE SZABLONY:",reply_markup=InlineKeyboardMarkup(rows))
         return
 
     if q.data.startswith("use_"):
-
-        idx = int(q.data[4:])
-        ad = render(saved_templates[user][idx], user, 0)
-
-        await context.bot.send_photo(
-            GROUP_ID,
-            LOGO_URL,
-            caption=ad,
-            parse_mode="HTML",
-            message_thread_id=TOPIC_ID
-        )
+        idx=int(q.data[4:])
+        ad=render(saved_templates[user][idx],user,0)
+        await context.bot.send_photo(GROUP_ID,LOGO_URL,caption=ad,parse_mode="HTML",message_thread_id=TOPIC_ID)
         return
+
+# ================= COLLECT =================
+
+async def collect(update:Update,context:ContextTypes.DEFAULT_TYPE):
+    uid=update.effective_user.id
+    text=update.message.text
+
+if context.user_data.get("add_bl") and uid == ADMIN_ID:
+    blacklist.add(text.lower())
+    context.user_data["add_bl"] = False
+    await update.message.reply_text(
+        f"✅ Dodano do blacklisty: {text.lower()}"
+    )
+    return
+    
+if context.user_data.get("add_vendor") and uid == ADMIN_ID:
+    VENDORS.add(text.lower())
+    context.user_data["add_vendor"] = False
+    await update.message.reply_text("✅ Dodano vendora")
+    return
+
+    if context.user_data.get("bl") and uid==ADMIN_ID:
+        blacklist.add(text.lower())
+        context.user_data["bl"]=False
+        await update.message.reply_text("DODANO DO BLACKLISTY")
+        return
+
+    if uid not in steps: return
+
+    if any(w in text.lower() for w in blacklist):
+        await update.message.reply_text("❌ ZABLOKOWANE SŁOWO")
+        return
+
+    if "qty" not in steps[uid]:
+        steps[uid]["qty"]=int(text)
+        await update.message.reply_text("PODAJ PRODUKT 1")
+        return
+
+    steps[uid]["items"].append(text)
+
+    if len(steps[uid]["items"])<steps[uid]["qty"]:
+        await update.message.reply_text(f"PODAJ PRODUKT {len(steps[uid]['items'])+1}")
+    else:
+        ad=render(steps[uid]["items"],update.effective_user.username,steps[uid]["style"])
+        await update.message.reply_text(ad,parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ PUBLIKUJ",callback_data="send")]]))
+
+# ================= MAIN =================
+
+def main():
+    app=ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(MessageHandler(filters.COMMAND,start))
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,collect))
+    print("🔥 MARKETPLACE PREMIUM ULTRA v7777.7777 ONLINE")
+    app.run_polling()
+
+if __name__=="__main__":
+    main()
