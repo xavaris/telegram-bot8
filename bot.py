@@ -24,12 +24,11 @@ steps = {}
 daily = {}
 last_ad = {}
 vendor_stats = {}
-quick_templates = {}   # {vendor:[items]}
 offer_id = 1000
 
 # ================= STYLE =================
 
-CHAR_MAP={"a":"@","e":"3","i":"1","o":"0","s":"$","t":"7"}
+CHAR_MAP = {"a":"@","e":"3","i":"1","o":"0","s":"$","t":"7"}
 
 def encode_name(t):
     return "".join(CHAR_MAP.get(c.lower(),c.upper()) for c in t)
@@ -52,9 +51,9 @@ def get_product_emoji(t):
 def now_pl():
     return datetime.now(TZ).strftime("%H:%M")
 
-# ================= 5 VISUAL TEMPLATES =================
+# ================= 5 TEMPLATES =================
 
-def build_offer(products,user,style):
+def render_offer(products,user,style):
     global offer_id
     offer_id+=1
     items="\n".join([f"• {get_product_emoji(p)} {encode_name(p)}" for p in products])
@@ -64,8 +63,6 @@ def build_offer(products,user,style):
 <b>████████████████</b>
 <b>🔥 OSTATNIA SZANSA 🔥</b>
 <b>████████████████</b>
-
-<b>🆔 #{offer_id}</b> | <b>{now_pl()}</b>
 
 {items}
 
@@ -80,7 +77,7 @@ def build_offer(products,user,style):
 
 {items}
 
-<b>📩 @{user}</b>
+<b>@{user}</b>
 """
 
     if style==3:
@@ -89,7 +86,7 @@ def build_offer(products,user,style):
 
 {items}
 
-<b>Kontakt: @{user}</b>
+<b>@{user}</b>
 """
 
     if style==4:
@@ -100,7 +97,6 @@ def build_offer(products,user,style):
 
 {items}
 
-<b>━━━━━━━━━━━━━━</b>
 <b>@{user}</b>
 """
 
@@ -112,17 +108,43 @@ def build_offer(products,user,style):
 
 {items}
 
-<b>📩 @{user}</b>
+<b>@{user}</b>
 """
 
 # ================= START =================
 
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
-    kb=[
-        [InlineKeyboardButton("➕ NOWA OFERTA",callback_data="new_offer")],
-        [InlineKeyboardButton("⚡ SZYBKA OFERTA",callback_data="quick_offer")]
-    ]
+    uid=update.effective_user.id
+    if uid==ADMIN_ID:
+        kb=[
+            [InlineKeyboardButton("➕ NOWA OFERTA",callback_data="new_offer")],
+            [InlineKeyboardButton("🛠 PANEL ADMINA",callback_data="admin")]
+        ]
+    else:
+        kb=[[InlineKeyboardButton("➕ NOWA OFERTA",callback_data="new_offer")]]
+
     await update.message.reply_text("🔥 MARKETPLACE 🔥",reply_markup=InlineKeyboardMarkup(kb))
+
+# ================= ADMIN =================
+
+def admin_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📃 VENDORZY",callback_data="vendors")],
+        [InlineKeyboardButton("🧹 WYCZYŚĆ TEMAT",callback_data="clean_topic")],
+        [InlineKeyboardButton("🔄 RESET LIMITÓW",callback_data="reset_limits")]
+    ])
+
+def vendors_keyboard():
+    rows=[]
+    row=[]
+    for v in VENDORS:
+        row.append(InlineKeyboardButton(v.upper(),callback_data=f"v_{v}"))
+        if len(row)==2:
+            rows.append(row)
+            row=[]
+    if row: rows.append(row)
+    rows.append([InlineKeyboardButton("⬅ POWRÓT",callback_data="admin")])
+    return InlineKeyboardMarkup(rows)
 
 # ================= BUTTONS =================
 
@@ -132,23 +154,64 @@ async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
     uid=q.from_user.id
     user=q.from_user.username.lower()
 
-    # NEW OFFER → TEMPLATE PICK
+    # ADMIN PANEL
+    if q.data=="admin" and uid==ADMIN_ID:
+        await q.message.reply_text("🛠 PANEL ADMINA",reply_markup=admin_keyboard())
+        return
+
+    if q.data=="vendors" and uid==ADMIN_ID:
+        await q.message.reply_text("VENDORZY:",reply_markup=vendors_keyboard())
+        return
+
+    if q.data.startswith("v_") and uid==ADMIN_ID:
+        v=q.data[2:]
+        stats=vendor_stats.get(v,0)
+        kb=[
+            [InlineKeyboardButton("🗑 USUŃ VENDORA",callback_data=f"del_{v}")],
+            [InlineKeyboardButton("⬅ POWRÓT",callback_data="vendors")]
+        ]
+        await q.message.reply_text(
+            f"VENDOR: {v.upper()}\nOFERTY: {stats}",
+            reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if q.data.startswith("del_") and uid==ADMIN_ID:
+        VENDORS.discard(q.data[4:])
+        await q.message.reply_text("USUNIĘTO")
+        return
+
+    if q.data=="clean_topic" and uid==ADMIN_ID:
+        for m in list(last_ad.values()):
+            try: await context.bot.delete_message(GROUP_ID,m)
+            except: pass
+        last_ad.clear()
+        await q.message.reply_text("TEMAT WYCZYSZCZONY")
+        return
+
+    if q.data=="reset_limits" and uid==ADMIN_ID:
+        daily.clear()
+        await q.message.reply_text("LIMITY ZRESETOWANE")
+        return
+
+    # NEW OFFER -> TEMPLATE PICK
     if q.data=="new_offer":
+        if user not in VENDORS:
+            await q.message.reply_text("❌ NIE JESTEŚ VENDOREM")
+            return
+
         kb=[[InlineKeyboardButton(f"SZABLON {i}",callback_data=f"tpl_{i}") for i in range(1,6)]]
-        await q.message.reply_text("WYBIERZ WYGLĄD:",reply_markup=InlineKeyboardMarkup(kb))
+        await q.message.reply_text("WYBIERZ SZABLON:",reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if q.data.startswith("tpl_"):
         style=int(q.data[-1])
-        steps[uid]={"style":style,"items":[],"qty":None}
-        kb=[[InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(1,6)],
-            [InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(6,11)]]
-        await q.message.reply_text("ILE PRODUKTÓW?",reply_markup=InlineKeyboardMarkup(kb))
+        steps[uid]={"style":style,"items":[]}
+        preview=render_offer(["BUCH","KOKS"],"preview",style)
+        kb=[[InlineKeyboardButton("DALEJ",callback_data="qty")]]
+        await q.message.reply_text(preview,parse_mode="HTML",reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # QUICK OFFER
-    if q.data=="quick_offer":
-        steps[uid]={"style":1,"items":[],"qty":None,"quick":True}
+    if q.data=="qty":
         kb=[[InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(1,6)],
             [InlineKeyboardButton(str(i),callback_data=f"q{i}") for i in range(6,11)]]
         await q.message.reply_text("ILE PRODUKTÓW?",reply_markup=InlineKeyboardMarkup(kb))
@@ -159,36 +222,18 @@ async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
         await q.message.reply_text("PODAJ PRODUKT 1")
         return
 
-    # SEND
     if q.data=="send":
-        data=steps[uid]
-        ad=build_offer(data["items"],user,data["style"])
-
+        ad=render_offer(steps[uid]["items"],user,steps[uid]["style"])
         msg=await context.bot.send_photo(
             GROUP_ID,LOGO_URL,
             caption=ad,parse_mode="HTML",
-            message_thread_id=TOPIC_ID
-        )
+            message_thread_id=TOPIC_ID)
 
         last_ad[uid]=msg.message_id
-
-        kb=[
-            [InlineKeyboardButton("💾 ZAPISZ JAKO SZYBKA",callback_data="save_quick")],
-            [InlineKeyboardButton("❌ NIE",callback_data="no_save")]
-        ]
-
-        await q.message.reply_text("Zapisać jako szybką ofertę?",reply_markup=InlineKeyboardMarkup(kb))
-        return
-
-    if q.data=="save_quick":
-        quick_templates[user]=steps[uid]["items"]
+        vendor_stats[user]=vendor_stats.get(user,0)+1
         steps.pop(uid)
-        await q.message.reply_text("✅ ZAPISANO")
-        return
 
-    if q.data=="no_save":
-        steps.pop(uid)
-        await q.message.reply_text("OK")
+        await q.message.reply_text("✅ OPUBLIKOWANO")
         return
 
 # ================= COLLECT =================
@@ -202,18 +247,9 @@ async def collect(update:Update,context:ContextTypes.DEFAULT_TYPE):
     if len(steps[uid]["items"])<steps[uid]["qty"]:
         await update.message.reply_text(f"PODAJ PRODUKT {len(steps[uid]['items'])+1}")
     else:
-        ad=build_offer(
-            steps[uid]["items"],
-            update.effective_user.username,
-            steps[uid]["style"]
-        )
-
+        ad=render_offer(steps[uid]["items"],update.effective_user.username,steps[uid]["style"])
         kb=[[InlineKeyboardButton("✅ PUBLIKUJ",callback_data="send")]]
-
-        await update.message.reply_text(
-            ad,parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+        await update.message.reply_text(ad,parse_mode="HTML",reply_markup=InlineKeyboardMarkup(kb))
 
 # ================= MAIN =================
 
@@ -222,7 +258,7 @@ def main():
     app.add_handler(MessageHandler(filters.COMMAND,start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,collect))
-    print("🔥 MARKETPLACE TEMPLATE SYSTEM ONLINE")
+    print("🔥 MARKETPLACE TEMPLATE + ADMIN ONLINE")
     app.run_polling()
 
 if __name__=="__main__":
