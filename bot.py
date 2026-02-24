@@ -1,39 +1,33 @@
-# MARKETPLACE PREMIUM ULTRA v99999.9099999
-# python-telegram-bot v20+
-
 import os
-from datetime import datetime
-import pytz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+import re
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
-# ================= CONFIG =================
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-GROUP_ID = int(os.getenv("GROUP_ID"))
-TOPIC_ID_WTB = int(os.getenv("TOPIC_ID_WTB"))
-TOPIC_ID_WTT = int(os.getenv("TOPIC_ID_WTT"))
-TOPIC_ID_WTS = int(os.getenv("TOPIC_ID_WTS"))
-
+# ==============================
+# RAILWAY VARIABLES
+# ==============================
+TOKEN = os.getenv("KEY")
+WTB_TOPIC = int(os.getenv("WTB"))
+WTS_TOPIC = int(os.getenv("WTS"))
+WTT_TOPIC = int(os.getenv("WTT"))
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-LOGO_URL = os.getenv("LOGO_URL")
-MAX_DAILY = int(os.getenv("MAX_DAILY", "3"))
 
-VENDORS = set(os.getenv("VENDOR_NAME", "").lower().split(","))
+vendors = set()
 
-TZ = pytz.timezone("Europe/Warsaw")
-
-# ================= MEMORY =================
-
-steps = {}
-saved_templates = {}
-vendor_stats = {}
-blacklist = set()
-offer_id = 1000
-
-# ================= MAPA LITER =================
-
+# ==============================
+# CHAR MAP (FULL ENCODE)
+# ==============================
 CHAR_MAP = {
     "a":"@","b":"ß","c":"¢","d":"Ð","e":"3","f":"₣","g":"6",
     "h":"Ħ","i":"1","j":"ʝ","k":"Ҡ","l":"Ł","m":"₥","n":"И",
@@ -41,223 +35,250 @@ CHAR_MAP = {
     "u":"Ц","v":"√","w":"₩","x":"Ж","y":"¥","z":"Ƶ"
 }
 
-def encode(t):
-    return "".join(CHAR_MAP.get(c.lower(), c.upper()) for c in t)
+def map_text(text: str) -> str:
+    result = ""
+    for char in text:
+        lower = char.lower()
+        if lower in CHAR_MAP:
+            mapped = CHAR_MAP[lower]
+            if char.isupper():
+                mapped = mapped.upper()
+            result += mapped
+        else:
+            result += char
+    return result
 
-# ================= EMOJI =================
 
-PRODUCT_EMOJI = {
-    "buch":"🌿","weed":"🌿",
-    "koks":"✉️","kokaina":"✉️","cola":"✉️",
-    "crystal":"💎","mefedron":"💎",
-    "xanax":"💊","mdma":"🍬","lsd":"🧠",
-    "hasz":"🟫","speed":"⚡"
-}
+def contains_price(text: str) -> bool:
+    return bool(re.search(r"\d+|zł|\$|€|pln|usd", text.lower()))
 
-def emoji(t):
-    for k,v in PRODUCT_EMOJI.items():
-        if k in t.lower():
-            return v
-    return "📦"
 
-def now():
-    return datetime.now(TZ).strftime("%H:%M")
+# ==============================
+# PREMIUM TEMPLATES
+# ==============================
+def template_wtb_wtt(username, content, typ):
+    icon = "🔎" if typ == "WTB" else "🔁"
 
-# ================= TEMPLATES =================
-
-def render(products, user, style, topic):
-    global offer_id
-    offer_id += 1
-
-    items = "\n".join([f"• {emoji(p)} {encode(p)}" for p in products])
-
-    tag = topic.upper()
-
-    return f"""
-<b>████████████████████</b>
-<b>🔥 {tag} MARKET 🔥</b>
-<b>████████████████████</b>
-
-🆔 #{offer_id} | 🕒 {now()}
-
-{items}
-
-<b>@{user}</b>
-"""
-
-# ================= START =================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user = (update.effective_user.username or "").lower()
-
-    if update.effective_user.id == ADMIN_ID:
-        VENDORS.add(user)
-
-    kb = [
-        [InlineKeyboardButton("➕ NOWA OFERTA", callback_data="new")],
-        [InlineKeyboardButton("📂 MOJE SZABLONY", callback_data="mytpl")]
-    ]
-
-    await update.message.reply_text(
-        "🔥 MARKETPLACE PREMIUM ULTRA 🔥",
-        reply_markup=InlineKeyboardMarkup(kb)
+    return (
+        "╔══════════════════════╗\n"
+        f"        {icon}  {typ} MARKET\n"
+        "╚══════════════════════╝\n\n"
+        f"👤 USER: {username}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{content}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚡ Powered by MARKET BOT"
     )
 
-# ================= BUTTONS =================
 
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def template_wts(username, products):
+    message = (
+        "╔══════════════════════╗\n"
+        "        🏪  WTS STORE\n"
+        "╚══════════════════════╝\n\n"
+        f"👤 VENDOR: {username}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🛒 AVAILABLE PRODUCTS:\n\n"
+    )
 
-    q = update.callback_query
-    await q.answer()
+    for i, product in enumerate(products, 1):
+        message += f"{i}️⃣  {product}\n"
 
-    uid = q.from_user.id
-    user = (q.from_user.username or "").lower()
+    message += (
+        "\n━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚡ Trusted Market System"
+    )
 
-    # -------- NEW --------
+    return message
 
-    if q.data == "new":
 
-        rows = [
-            [InlineKeyboardButton("🟢 WTB", callback_data="topic_wtb")],
-            [InlineKeyboardButton("🔵 WTT", callback_data="topic_wtt")]
+# ==============================
+# START
+# ==============================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    keyboard = [
+        [
+            InlineKeyboardButton("WTB", callback_data="WTB"),
+            InlineKeyboardButton("WTS", callback_data="WTS"),
+            InlineKeyboardButton("WTT", callback_data="WTT"),
         ]
+    ]
 
-        if user in VENDORS:
-            rows.append([InlineKeyboardButton("🔴 WTS", callback_data="topic_wts")])
+    if user_id == ADMIN_ID:
+        keyboard.append(
+            [InlineKeyboardButton("⚙ Panel Admina", callback_data="ADMIN_PANEL")]
+        )
 
-        await q.message.reply_text(
-            "📌 Wybierz temat:",
-            reply_markup=InlineKeyboardMarkup(rows)
+    await update.message.reply_text(
+        "Wybierz typ ogłoszenia:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
+# ==============================
+# BUTTON HANDLER
+# ==============================
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    user_id = user.id
+    username = user.username
+
+    # ADMIN PANEL
+    if query.data == "ADMIN_PANEL" and user_id == ADMIN_ID:
+        keyboard = [
+            [InlineKeyboardButton("➕ Dodaj Vendora", callback_data="ADD_VENDOR")],
+            [InlineKeyboardButton("➖ Usuń Vendora", callback_data="REMOVE_VENDOR")],
+        ]
+        await query.edit_message_text(
+            "Panel Admina:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return
 
-    # -------- TOPIC --------
+    if query.data == "ADD_VENDOR":
+        context.user_data["admin_action"] = "add"
+        await query.edit_message_text("Podaj @username do dodania:")
+        return
 
-    if q.data.startswith("topic_"):
+    if query.data == "REMOVE_VENDOR":
+        context.user_data["admin_action"] = "remove"
+        await query.edit_message_text("Podaj @username do usunięcia:")
+        return
 
-        topic = q.data.split("_")[1]
-
-        if topic == "wts" and user not in VENDORS:
-            await q.message.reply_text("❌ WTS tylko dla vendorów.")
+    # WTS FLOW
+    if query.data == "WTS":
+        if user_id != ADMIN_ID and username not in vendors:
+            await query.edit_message_text("❌ Temat tylko dla vendorów.")
             return
 
-        steps[uid] = {
-            "topic": topic,
-            "items": []
-        }
+        keyboard = []
+        row = []
+        for i in range(1, 11):
+            row.append(InlineKeyboardButton(str(i), callback_data=f"WTS_COUNT_{i}"))
+            if i % 5 == 0:
+                keyboard.append(row)
+                row = []
 
-        await q.message.reply_text("Ile produktów? (1-10)")
+        await query.edit_message_text(
+            "Ile masz produktów?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
         return
 
-    # -------- SEND QTY --------
+    if query.data.startswith("WTS_COUNT_"):
+        count = int(query.data.split("_")[-1])
+        context.user_data["wts_count"] = count
+        context.user_data["wts_products"] = []
+        context.user_data["current_product"] = 1
 
-    if q.data == "send":
+        await query.edit_message_text("Podaj nazwę produktu 1 (bez cen):")
+        return
 
+    # WTB / WTT
+    if query.data in ["WTB", "WTT"]:
         topic_map = {
-            "wtb": TOPIC_ID_WTB,
-            "wtt": TOPIC_ID_WTT,
-            "wts": TOPIC_ID_WTS
+            "WTB": WTB_TOPIC,
+            "WTT": WTT_TOPIC,
         }
 
-        ad = render(
-            steps[uid]["items"],
-            user,
-            0,
-            steps[uid]["topic"]
-        )
+        context.user_data["selected_topic"] = topic_map[query.data]
+        context.user_data["selected_type"] = query.data
 
-        await context.bot.send_photo(
-            GROUP_ID,
-            LOGO_URL,
-            caption=ad,
-            parse_mode="HTML",
-            message_thread_id=topic_map[steps[uid]["topic"]]
-        )
-
-        await q.message.reply_text("✅ OPUBLIKOWANO")
-        steps.pop(uid)
+        await query.edit_message_text("Napisz treść ogłoszenia:")
         return
 
-    # -------- TEMPLATES --------
 
-    if q.data == "mytpl":
-
-        rows = [
-            [InlineKeyboardButton(f"SZABLON {i+1}", callback_data=f"use_{i}")]
-            for i in range(len(saved_templates.get(user, [])))
-        ]
-
-        await q.message.reply_text(
-            "Twoje szablony:",
-            reply_markup=InlineKeyboardMarkup(rows)
-        )
-        return
-
-    if q.data.startswith("use_"):
-
-        idx = int(q.data[4:])
-        items = saved_templates[user][idx]
-
-        ad = render(items, user, 0, "wts")
-
-        await context.bot.send_photo(
-            GROUP_ID,
-            LOGO_URL,
-            caption=ad,
-            parse_mode="HTML",
-            message_thread_id=TOPIC_ID_WTS
-        )
-        return
-
-# ================= COLLECT =================
-
-async def collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    uid = update.effective_user.id
+# ==============================
+# MESSAGE HANDLER
+# ==============================
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     text = update.message.text
 
-    if uid not in steps:
+    # ADMIN ACTION
+    if user.id == ADMIN_ID and "admin_action" in context.user_data:
+        username = text.replace("@", "")
+        if context.user_data["admin_action"] == "add":
+            vendors.add(username)
+            await update.message.reply_text(f"✅ Dodano vendora @{username}")
+        else:
+            vendors.discard(username)
+            await update.message.reply_text(f"❌ Usunięto vendora @{username}")
+
+        del context.user_data["admin_action"]
         return
 
-    if "qty" not in steps[uid]:
+    # WTS FLOW
+    if "wts_count" in context.user_data:
+        if contains_price(text):
+            await update.message.reply_text("❌ Zakaz podawania cen.")
+            return
 
-        qty = int(text)
-        steps[uid]["qty"] = qty
-        await update.message.reply_text("Podaj produkt 1")
+        context.user_data["wts_products"].append(text)
+
+        if len(context.user_data["wts_products"]) < context.user_data["wts_count"]:
+            next_num = len(context.user_data["wts_products"]) + 1
+            await update.message.reply_text(f"Podaj nazwę produktu {next_num}:")
+            return
+
+        username_display = f"@{user.username}" if user.username else user.first_name
+        mapped_products = [map_text(p) for p in context.user_data["wts_products"]]
+
+        final = template_wts(username_display, mapped_products)
+
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=final,
+            message_thread_id=WTS_TOPIC,
+        )
+
+        await update.message.reply_text("✅ Ogłoszenie WTS dodane")
+
+        context.user_data.clear()
         return
 
-    steps[uid]["items"].append(text)
+    # WTB / WTT
+    if "selected_topic" in context.user_data:
+        username_display = f"@{user.username}" if user.username else user.first_name
+        mapped = map_text(text)
 
-    if len(steps[uid]["items"]) < steps[uid]["qty"]:
-        await update.message.reply_text(
-            f"Podaj produkt {len(steps[uid]['items'])+1}"
-        )
-    else:
-        ad = render(
-            steps[uid]["items"],
-            update.effective_user.username,
-            0,
-            steps[uid]["topic"]
+        final = template_wtb_wtt(
+            username_display,
+            mapped,
+            context.user_data["selected_type"],
         )
 
-        await update.message.reply_text(
-            ad,
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("✅ PUBLIKUJ", callback_data="send")]]
-            )
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=final,
+            message_thread_id=context.user_data["selected_topic"],
         )
 
-# ================= MAIN =================
+        await update.message.reply_text("✅ Ogłoszenie dodane")
+        context.user_data.clear()
+        return
 
+    await update.message.reply_text("Użyj /start aby dodać ogłoszenie.")
+
+
+# ==============================
+# MAIN
+# ==============================
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(MessageHandler(filters.COMMAND, start))
-    app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, collect))
-    print("🔥 MARKETPLACE PREMIUM ULTRA v99999.9099999 ONLINE")
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print("🔥 MARKET BOT 9999.9999 działa...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
