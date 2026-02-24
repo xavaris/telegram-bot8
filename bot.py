@@ -28,15 +28,8 @@ vendors = set(v.strip().lower() for v in env_vendors.split(",") if v.strip())
 # BLACKLIST
 # ==============================
 BANNED_WORDS = [
-    "mewa",
-    "buch",
-    "xanax",
-    "tussy",
-    "weed",
-    "koks",
-    "cocaine",
-    "heroina",
-    "lsd",
+    "mewa", "buch", "xanax", "tussy",
+    "weed", "koks", "cocaine", "heroina", "lsd"
 ]
 
 def obfuscate_word(word: str) -> str:
@@ -48,48 +41,40 @@ def obfuscate_word(word: str) -> str:
         "u": "υ",
         "s": "$",
     }
-    result = ""
-    for char in word:
-        result += replace_map.get(char.lower(), char)
-    return result
+    return "".join(replace_map.get(c.lower(), c) for c in word)
 
 def smart_mask_caps(text: str) -> str:
     def normalize(word):
         return re.sub(r'[^a-zA-Z]', '', word.lower())
 
-    words = text.split()
-    final_words = []
-
-    for word in words:
+    result = []
+    for word in text.split():
         normalized = normalize(word)
-
         if any(bad in normalized for bad in BANNED_WORDS):
-            masked = obfuscate_word(word)
-            final_words.append(masked.upper())
+            result.append(obfuscate_word(word).upper())
         else:
-            final_words.append(word.upper())
-
-    return " ".join(final_words)
+            result.append(word.upper())
+    return " ".join(result)
 
 def contains_price(text: str) -> bool:
     return bool(re.search(r"\d+|zł|pln|usd|€|\$", text.lower()))
 
 # ==============================
-# PREMIUM TEMPLATE
+# TEMPLATE
 # ==============================
 def premium_template(title: str, username: str, content: str) -> str:
     return (
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💎 {title} MARKET\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"👤 {username}\n\n"
         f"{content}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚡ OFFICIAL MARKETPLACE SYSTEM"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚡ OFFICIAL MARKETPLACE SYSTEM"
     )
 
 # ==============================
-# START (PRIVATE ONLY)
+# START (DM ONLY)
 # ==============================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
@@ -152,23 +137,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data in ["WTB", "WTT"]:
         context.user_data["type"] = query.data
-        context.user_data["topic"] = (
-            WTB_TOPIC if query.data == "WTB" else WTT_TOPIC
-        )
+        context.user_data["topic"] = WTB_TOPIC if query.data == "WTB" else WTT_TOPIC
         await query.edit_message_text("✍ NAPISZ TREŚĆ OGŁOSZENIA:")
         return
 
     if query.data == "WTS":
-        if user.username is None or user.username.lower() not in vendors and user.id != ADMIN_ID:
+        if user.username is None or (
+            user.username.lower() not in vendors and user.id != ADMIN_ID
+        ):
             await query.edit_message_text("❌ TYLKO VENDOR MOŻE PUBLIKOWAĆ WTS.")
             return
 
-        context.user_data["type"] = "WTS"
-        context.user_data["topic"] = WTS_TOPIC
-        context.user_data["products"] = []
+        # kafelki 1–10
+        keyboard = []
+        row = []
+        for i in range(1, 11):
+            row.append(InlineKeyboardButton(str(i), callback_data=f"WTS_COUNT_{i}"))
+            if i % 5 == 0:
+                keyboard.append(row)
+                row = []
 
         await query.edit_message_text(
-            "🛒 PODAWAJ NAZWY PRODUKTÓW.\nKAŻDY W OSOBNEJ WIADOMOŚCI.\nNAPISZ /DONE GDY SKOŃCZYSZ."
+            "🛒 ILE PRODUKTÓW CHCESZ DODAĆ?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
+    if query.data.startswith("WTS_COUNT_"):
+        count = int(query.data.split("_")[-1])
+        context.user_data["wts_total"] = count
+        context.user_data["wts_products"] = []
+        context.user_data["wts_current"] = 1
+
+        await query.edit_message_text(
+            f"PODAJ NAZWĘ PRODUKTU 1 (BEZ CEN):"
         )
         return
 
@@ -197,41 +199,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # WTS FLOW
-    if context.user_data.get("type") == "WTS":
-        if text.upper() == "/DONE":
-            username_display = (
-                f"@{user.username}" if user.username else user.first_name
-            )
-
-            products_text = "\n".join(
-                f"{i+1}. {smart_mask_caps(p)}"
-                for i, p in enumerate(context.user_data["products"])
-            )
-
-            await context.bot.send_photo(
-                chat_id=GROUP_ID,
-                message_thread_id=WTS_TOPIC,
-                photo=LOGO_URL,
-                caption=premium_template("WTS", username_display.upper(), products_text),
-            )
-
-            await update.message.reply_text("✅ OPUBLIKOWANO.")
-            context.user_data.clear()
-            return
-
+    if "wts_total" in context.user_data:
         if contains_price(text):
             await update.message.reply_text("❌ ZAKAZ PODAWANIA CEN.")
             return
 
-        context.user_data["products"].append(text)
-        await update.message.reply_text("✔ DODANO. KOLEJNY LUB /DONE.")
+        context.user_data["wts_products"].append(text)
+
+        if len(context.user_data["wts_products"]) < context.user_data["wts_total"]:
+            next_num = len(context.user_data["wts_products"]) + 1
+            await update.message.reply_text(
+                f"PODAJ NAZWĘ PRODUKTU {next_num} (BEZ CEN):"
+            )
+            return
+
+        # publikacja
+        username_display = (
+            f"@{user.username}" if user.username else user.first_name
+        ).upper()
+
+        products_text = "\n".join(
+            f"{i+1}. {smart_mask_caps(p)}"
+            for i, p in enumerate(context.user_data["wts_products"])
+        )
+
+        await context.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=WTS_TOPIC,
+            photo=LOGO_URL,
+            caption=premium_template("WTS", username_display, products_text),
+        )
+
+        await update.message.reply_text("✅ OPUBLIKOWANO.")
+        context.user_data.clear()
         return
 
     # WTB / WTT
     if "topic" in context.user_data:
         username_display = (
             f"@{user.username}" if user.username else user.first_name
-        )
+        ).upper()
 
         final_text = smart_mask_caps(text)
 
@@ -241,7 +248,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             photo=LOGO_URL,
             caption=premium_template(
                 context.user_data["type"],
-                username_display.upper(),
+                username_display,
                 final_text,
             ),
         )
