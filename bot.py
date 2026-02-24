@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -10,9 +11,6 @@ from telegram.ext import (
     filters,
 )
 
-# ==============================
-# ENV VARIABLES
-# ==============================
 TOKEN = os.getenv("KEY")
 GROUP_ID = int(os.getenv("GROUP_ID"))
 WTB_TOPIC = int(os.getenv("WTB"))
@@ -22,9 +20,6 @@ ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 vendors = set()
 
-# ==============================
-# CHAR MAP
-# ==============================
 CHAR_MAP = {
     "a":"@","b":"ß","c":"¢","d":"Ð","e":"3","f":"₣","g":"6",
     "h":"Ħ","i":"1","j":"ʝ","k":"Ҡ","l":"Ł","m":"₥","n":"И",
@@ -48,43 +43,30 @@ def map_text(text: str) -> str:
 def contains_price(text: str) -> bool:
     return bool(re.search(r"\d+|zł|\$|€|pln|usd", text.lower()))
 
-# ==============================
-# TEMPLATES
-# ==============================
-def template_wtb_wtt(username, content, typ):
+def template_basic(username, content, typ):
     icon = "🔎" if typ == "WTB" else "🔁"
     return (
-        "╔══════════════════════╗\n"
-        f"        {icon} {typ} MARKET\n"
-        "╚══════════════════════╝\n\n"
-        f"👤 USER: {username}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{content}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━"
+        f"╔══════════════════╗\n"
+        f"   {icon} {typ} MARKET\n"
+        f"╚══════════════════╝\n\n"
+        f"👤 {username}\n\n"
+        f"{content}"
     )
 
 def template_wts(username, products):
     msg = (
-        "╔══════════════════════╗\n"
-        "        🏪 WTS STORE\n"
-        "╚══════════════════════╝\n\n"
-        f"👤 VENDOR: {username}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🛒 PRODUCTS:\n\n"
+        "╔══════════════════╗\n"
+        "   🏪 WTS STORE\n"
+        "╚══════════════════╝\n\n"
+        f"👤 {username}\n\n"
     )
     for i, p in enumerate(products, 1):
         msg += f"{i}️⃣ {p}\n"
-    msg += "\n━━━━━━━━━━━━━━━━━━━━━━"
     return msg
 
-# ==============================
-# START
-# ==============================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != GROUP_ID:
         return
-
-    user_id = update.effective_user.id
 
     keyboard = [
         [
@@ -94,19 +76,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
 
-    if user_id == ADMIN_ID:
+    if update.effective_user.id == ADMIN_ID:
         keyboard.append(
-            [InlineKeyboardButton("⚙ Panel Admina", callback_data="ADMIN_PANEL")]
+            [InlineKeyboardButton("⚙ Panel Admina", callback_data="ADMIN")]
         )
 
     await update.message.reply_text(
-        "Wybierz typ ogłoszenia:",
+        "Wybierz temat:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
-# ==============================
-# BUTTONS
-# ==============================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -115,13 +94,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = query.from_user
-    user_id = user.id
-    username = user.username
 
-    if query.data == "ADMIN_PANEL" and user_id == ADMIN_ID:
+    if query.data == "ADMIN" and user.id == ADMIN_ID:
         keyboard = [
-            [InlineKeyboardButton("➕ Dodaj Vendora", callback_data="ADD")],
-            [InlineKeyboardButton("➖ Usuń Vendora", callback_data="REMOVE")],
+            [InlineKeyboardButton("➕ Dodaj", callback_data="ADD")],
+            [InlineKeyboardButton("➖ Usuń", callback_data="REMOVE")],
         ]
         await query.edit_message_text(
             "Panel Admina:",
@@ -135,7 +112,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data == "WTS":
-        if user_id != ADMIN_ID and username not in vendors:
+        if user.id != ADMIN_ID and user.username not in vendors:
             await query.edit_message_text("❌ Tylko vendor.")
             return
 
@@ -157,20 +134,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         count = int(query.data.split("_")[1])
         context.user_data["wts_count"] = count
         context.user_data["wts_products"] = []
-        await query.edit_message_text("Podaj nazwę produktu 1:")
+        await query.edit_message_text("Produkt 1:")
         return
 
     if query.data in ["WTB", "WTT"]:
-        context.user_data["selected_type"] = query.data
-        context.user_data["selected_topic"] = (
+        context.user_data["type"] = query.data
+        context.user_data["topic"] = (
             WTB_TOPIC if query.data == "WTB" else WTT_TOPIC
         )
-        await query.edit_message_text("Napisz treść ogłoszenia:")
+        await query.edit_message_text("Napisz treść:")
         return
 
-# ==============================
-# MESSAGE HANDLER
-# ==============================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != GROUP_ID:
         return
@@ -178,70 +152,59 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text
 
-    # ADMIN ACTION
     if user.id == ADMIN_ID and "admin_action" in context.user_data:
         username = text.replace("@", "")
         if context.user_data["admin_action"] == "ADD":
             vendors.add(username)
-            await update.message.reply_text("✅ Dodano vendora")
+            await update.message.reply_text("✅ Dodano")
         else:
             vendors.discard(username)
-            await update.message.reply_text("❌ Usunięto vendora")
-
+            await update.message.reply_text("❌ Usunięto")
         context.user_data.clear()
         return
 
-    # WTS FLOW
     if "wts_count" in context.user_data:
         if contains_price(text):
-            await update.message.reply_text("❌ Zakaz cen.")
+            await update.message.reply_text("❌ Zakaz cen")
             return
 
         context.user_data["wts_products"].append(text)
 
         if len(context.user_data["wts_products"]) < context.user_data["wts_count"]:
-            next_num = len(context.user_data["wts_products"]) + 1
-            await update.message.reply_text(f"Produkt {next_num}:")
+            await update.message.reply_text(
+                f"Produkt {len(context.user_data['wts_products'])+1}:"
+            )
             return
 
         username_display = f"@{user.username}" if user.username else user.first_name
         mapped_products = [map_text(p) for p in context.user_data["wts_products"]]
-        final = template_wts(username_display, mapped_products)
 
         await context.bot.send_message(
             chat_id=GROUP_ID,
             message_thread_id=WTS_TOPIC,
-            text=final,
+            text=template_wts(username_display, mapped_products),
         )
 
-        await update.message.reply_text("✅ WTS dodane")
         context.user_data.clear()
         return
 
-    # WTB / WTT
-    if "selected_topic" in context.user_data:
+    if "topic" in context.user_data:
         username_display = f"@{user.username}" if user.username else user.first_name
         mapped = map_text(text)
 
-        final = template_wtb_wtt(
-            username_display,
-            mapped,
-            context.user_data["selected_type"],
-        )
-
         await context.bot.send_message(
             chat_id=GROUP_ID,
-            message_thread_id=context.user_data["selected_topic"],
-            text=final,
+            message_thread_id=context.user_data["topic"],
+            text=template_basic(
+                username_display,
+                mapped,
+                context.user_data["type"],
+            ),
         )
 
-        await update.message.reply_text("✅ Dodano ogłoszenie")
         context.user_data.clear()
         return
 
-# ==============================
-# MAIN
-# ==============================
 def main():
     app = Application.builder().token(TOKEN).build()
 
@@ -249,8 +212,8 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("🔥 BOT działa w jednej grupie (3 tematy)")
-    app.run_polling()
+    print("🔥 Railway Bot Running (Single Instance Mode)")
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
