@@ -2,7 +2,11 @@ import os
 import re
 import sqlite3
 import time
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -24,7 +28,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID"))
 LOGO_URL = os.getenv("LOGO_URL")
 
 # =========================
-# DATABASE (TRWAŁA)
+# DATABASE
 # =========================
 conn = sqlite3.connect("market.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -45,7 +49,7 @@ CREATE TABLE IF NOT EXISTS cooldowns (
 conn.commit()
 
 # =========================
-# PREMIUM LEET MAP
+# LEET MAP
 # =========================
 CHAR_MAP = {
     "a": "@",
@@ -61,24 +65,21 @@ def smart_mask_caps(text: str) -> str:
     result = ""
     for char in text:
         lower = char.lower()
-        if lower in CHAR_MAP:
-            result += CHAR_MAP[lower]
-        else:
-            result += char
+        result += CHAR_MAP.get(lower, char)
     return result.upper()
 
 def contains_price(text: str) -> bool:
     return bool(re.search(r"\d+|zł|pln|usd|€|\$", text.lower()))
 
 # =========================
-# DATABASE HELPERS
+# DB HELPERS
 # =========================
 def is_vendor(username: str) -> bool:
     cursor.execute("SELECT 1 FROM vendors WHERE username=?", (username,))
     return cursor.fetchone() is not None
 
 def add_vendor(username: str):
-    cursor.execute("INSERT OR IGNORE INTO vendors(username) VALUES(?)", (username,))
+    cursor.execute("INSERT OR IGNORE INTO vendors VALUES(?)", (username,))
     conn.commit()
 
 def remove_vendor(username: str):
@@ -106,7 +107,7 @@ def set_last_post(user_id: int):
 # =========================
 # TEMPLATE
 # =========================
-def premium_template(title: str, username: str, content: str, verified: bool) -> str:
+def premium_template(title, username, content, verified):
     badge = "👑 VERIFIED VENDOR\n" if verified else ""
     return (
         f"💎 {title} MARKET\n\n"
@@ -117,27 +118,42 @@ def premium_template(title: str, username: str, content: str, verified: bool) ->
     )
 
 # =========================
-# AUTO MESSAGES 12H
+# AUTO POSTS (12H)
 # =========================
 async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
+
+    # WTS → kontakt do ADMINA (człowiek)
     await context.bot.send_message(
         chat_id=GROUP_ID,
         message_thread_id=WTS_TOPIC,
-        text="🔥 CHCESZ ZOSTAĆ VENDOREM?\nNAPISZ DO ADMINISTRACJI @burwusovy"
+        text=(
+            "🔥 CHCESZ ZOSTAĆ VENDOREM?\n"
+            "NAPISZ DO ADMINISTRACJI @burwusovy"
+        )
     )
 
-    text = "🛒 CHCESZ COŚ KUPIĆ LUB WYMIENIĆ?\nNAPISZ DO @Ogloszeniovybot"
+    # WTB / WTT → przycisk do bota z deep link
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "📩 DODAJ OGŁOSZENIE",
+            url="https://t.me/ogloszeniovybot?start=1"
+        )
+    ]])
+
+    text = "🛒 CHCESZ COŚ KUPIĆ LUB WYMIENIĆ?"
 
     await context.bot.send_message(
         chat_id=GROUP_ID,
         message_thread_id=WTB_TOPIC,
-        text=text
+        text=text,
+        reply_markup=keyboard
     )
 
     await context.bot.send_message(
         chat_id=GROUP_ID,
         message_thread_id=WTT_TOPIC,
-        text=text
+        text=text,
+        reply_markup=keyboard
     )
 
 # =========================
@@ -162,12 +178,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # =========================
-# BUTTON HANDLER
+# BUTTONS
 # =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user = query.from_user
 
     if query.data == "ADMIN" and user.id == ADMIN_ID:
@@ -182,7 +197,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "LIST":
         vendors = get_vendors()
         text = "\n".join(f"@{v}" for v in vendors) or "BRAK"
-        await query.edit_message_text(f"VENDORZY:\n{text}")
+        await query.edit_message_text(text)
         return
 
     if query.data in ["ADD", "REMOVE"]:
@@ -197,10 +212,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("TYLKO VENDOR MOŻE PUBLIKOWAĆ WTS.")
             return
 
-        last = get_last_post(user.id)
-        if time.time() - last < 6 * 60 * 60:
-            remaining = int((6 * 60 * 60 - (time.time() - last)) / 3600)
-            await query.edit_message_text(f"COOLDOWN. WRÓĆ ZA {remaining}H.")
+        if time.time() - get_last_post(user.id) < 6 * 60 * 60:
+            await query.edit_message_text("COOLDOWN 6H.")
             return
 
         keyboard = []
@@ -218,10 +231,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data.startswith("CNT_"):
-        count = int(query.data.split("_")[1])
-        context.user_data["wts_total"] = count
+        context.user_data["wts_total"] = int(query.data.split("_")[1])
         context.user_data["wts_products"] = []
-        await query.edit_message_text("PODAJ NAZWĘ PRODUKTU 1:")
+        await query.edit_message_text("PODAJ PRODUKT 1:")
         return
 
     if query.data in ["WTB", "WTT"]:
@@ -231,7 +243,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 # =========================
-# MESSAGE HANDLER
+# MESSAGES
 # =========================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
@@ -242,14 +254,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user.id == ADMIN_ID and "admin_action" in context.user_data:
         username = text.replace("@", "").lower()
-
         if context.user_data["admin_action"] == "ADD":
             add_vendor(username)
             await update.message.reply_text("DODANO.")
         else:
             remove_vendor(username)
             await update.message.reply_text("USUNIĘTO.")
-
         context.user_data.clear()
         return
 
@@ -282,9 +292,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         set_last_post(user.id)
-
-        await update.message.reply_text("OPUBLIKOWANO.")
         context.user_data.clear()
+        await update.message.reply_text("OPUBLIKOWANO.")
         return
 
     if "topic" in context.user_data:
@@ -302,8 +311,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         )
 
-        await update.message.reply_text("OPUBLIKOWANO.")
         context.user_data.clear()
+        await update.message.reply_text("OPUBLIKOWANO.")
 
 # =========================
 # MAIN
@@ -315,9 +324,10 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    app.job_queue.run_repeating(auto_messages, interval=43200, first=10)
+    if app.job_queue:
+        app.job_queue.run_repeating(auto_messages, interval=43200, first=10)
 
-    print("ULTRA FINAL PRODUCTION BOT RUNNING")
+    print("FINAL ULTRA PRODUCTION RUNNING")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
