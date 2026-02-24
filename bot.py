@@ -10,9 +10,9 @@ from telegram.ext import (
     filters,
 )
 
-# ==============================
+# ======================
 # ENV
-# ==============================
+# ======================
 TOKEN = os.getenv("KEY")
 GROUP_ID = int(os.getenv("GROUP_ID"))
 WTB_TOPIC = int(os.getenv("WTB"))
@@ -24,58 +24,59 @@ LOGO_URL = os.getenv("LOGO_URL")
 env_vendors = os.getenv("VENDORS", "")
 vendors = set(v.strip().lower() for v in env_vendors.split(",") if v.strip())
 
-# ==============================
-# BLACKLIST
-# ==============================
-BANNED_WORDS = [
-    "mewa", "buch", "xanax", "tussy",
-    "weed", "koks", "cocaine", "heroina", "lsd"
-]
-
-def obfuscate_word(word: str) -> str:
-    replace_map = {
-        "a": "@",
-        "e": "3",
-        "i": "1",
-        "o": "0",
-        "u": "υ",
-        "s": "$",
-    }
-    return "".join(replace_map.get(c.lower(), c) for c in word)
+# ======================
+# MAPA SŁÓW (KONKRETNA)
+# ======================
+BANNED_MAP = {
+    "mewa": "M3W@",
+    "buch": "BЦCH",
+    "xanax": "XΛNΛX",
+    "tussy": "TЦ$$Y",
+    "weed": "W33D",
+    "clony": "CL0NY",
+    "koks": "KØK$",
+}
 
 def smart_mask_caps(text: str) -> str:
-    def normalize(word):
-        return re.sub(r'[^a-zA-Z]', '', word.lower())
-
+    words = text.split()
     result = []
-    for word in text.split():
-        normalized = normalize(word)
-        if any(bad in normalized for bad in BANNED_WORDS):
-            result.append(obfuscate_word(word).upper())
+
+    for word in words:
+        clean = re.sub(r'[^a-zA-Z]', '', word).lower()
+
+        if clean in BANNED_MAP:
+            result.append(BANNED_MAP[clean])
         else:
             result.append(word.upper())
+
     return " ".join(result)
 
 def contains_price(text: str) -> bool:
     return bool(re.search(r"\d+|zł|pln|usd|€|\$", text.lower()))
 
-# ==============================
-# TEMPLATE
-# ==============================
-def premium_template(title: str, username: str, content: str) -> str:
+# ======================
+# TEMPLATE PREMIUM
+# ======================
+def premium_template(title: str, username: str, content: str, is_vendor: bool) -> str:
+
+    badge = "👑 VERIFIED VENDOR\n" if is_vendor else ""
+
     return (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💎 {title} MARKET\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👤 {username}\n\n"
+        "═══════════════════════════\n"
+        f"   ☠  {title}  BLACK MARKET  ☠\n"
+        "═══════════════════════════\n\n"
+        f"{badge}"
+        f"👤  {username}\n"
+        "───────────────────────────\n\n"
         f"{content}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "⚡ OFFICIAL MARKETPLACE SYSTEM"
+        "───────────────────────────\n"
+        "⚡ OFFICIAL MARKET SYSTEM\n"
+        "═══════════════════════════"
     )
 
-# ==============================
+# ======================
 # START (DM ONLY)
-# ==============================
+# ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
@@ -90,13 +91,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton("⚙ ADMIN PANEL", callback_data="ADMIN")])
 
     await update.message.reply_text(
-        "💎 WYBIERZ TYP OGŁOSZENIA:",
+        "WYBIERZ TYP OGŁOSZENIA:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
-# ==============================
+# ======================
 # ADMIN PANEL
-# ==============================
+# ======================
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("➕ DODAJ VENDORA", callback_data="ADD_VENDOR")],
@@ -105,13 +106,13 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await update.effective_message.reply_text(
-        "⚙ PANEL ADMINA:",
+        "PANEL ADMINA:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
-# ==============================
+# ======================
 # BUTTON HANDLER
-# ==============================
+# ======================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -127,7 +128,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "LIST_VENDORS":
         vendor_list = "\n".join(f"• @{v}" for v in vendors) or "BRAK"
-        await query.edit_message_text(f"📋 VENDORZY:\n\n{vendor_list}")
+        await query.edit_message_text(f"VENDORZY:\n\n{vendor_list}")
         return
 
     if query.data in ["ADD_VENDOR", "REMOVE_VENDOR"]:
@@ -138,17 +139,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data in ["WTB", "WTT"]:
         context.user_data["type"] = query.data
         context.user_data["topic"] = WTB_TOPIC if query.data == "WTB" else WTT_TOPIC
-        await query.edit_message_text("✍ NAPISZ TREŚĆ OGŁOSZENIA:")
+        await query.edit_message_text("NAPISZ TREŚĆ OGŁOSZENIA:")
         return
 
     if query.data == "WTS":
         if user.username is None or (
             user.username.lower() not in vendors and user.id != ADMIN_ID
         ):
-            await query.edit_message_text("❌ TYLKO VENDOR MOŻE PUBLIKOWAĆ WTS.")
+            await query.edit_message_text("TYLKO VENDOR MOŻE PUBLIKOWAĆ WTS.")
             return
 
-        # kafelki 1–10
         keyboard = []
         row = []
         for i in range(1, 11):
@@ -158,7 +158,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 row = []
 
         await query.edit_message_text(
-            "🛒 ILE PRODUKTÓW CHCESZ DODAĆ?",
+            "ILE PRODUKTÓW CHCESZ DODAĆ?",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return
@@ -169,14 +169,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["wts_products"] = []
         context.user_data["wts_current"] = 1
 
-        await query.edit_message_text(
-            f"PODAJ NAZWĘ PRODUKTU 1 (BEZ CEN):"
-        )
+        await query.edit_message_text("PODAJ NAZWĘ PRODUKTU 1 (BEZ CEN):")
         return
 
-# ==============================
+# ======================
 # MESSAGE HANDLER
-# ==============================
+# ======================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
@@ -190,10 +188,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if context.user_data["admin_action"] == "ADD_VENDOR":
             vendors.add(username)
-            await update.message.reply_text("✅ DODANO VENDORA.")
+            await update.message.reply_text("DODANO VENDORA.")
         else:
             vendors.discard(username)
-            await update.message.reply_text("❌ USUNIĘTO VENDORA.")
+            await update.message.reply_text("USUNIĘTO VENDORA.")
 
         context.user_data.clear()
         return
@@ -201,7 +199,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # WTS FLOW
     if "wts_total" in context.user_data:
         if contains_price(text):
-            await update.message.reply_text("❌ ZAKAZ PODAWANIA CEN.")
+            await update.message.reply_text("ZAKAZ PODAWANIA CEN.")
             return
 
         context.user_data["wts_products"].append(text)
@@ -213,24 +211,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # publikacja
         username_display = (
             f"@{user.username}" if user.username else user.first_name
         ).upper()
 
+        is_vendor = (
+            user.username and user.username.lower() in vendors
+        )
+
         products_text = "\n".join(
-            f"{i+1}. {smart_mask_caps(p)}"
-            for i, p in enumerate(context.user_data["wts_products"])
+            f"✦  {smart_mask_caps(p)}"
+            for p in context.user_data["wts_products"]
         )
 
         await context.bot.send_photo(
             chat_id=GROUP_ID,
             message_thread_id=WTS_TOPIC,
             photo=LOGO_URL,
-            caption=premium_template("WTS", username_display, products_text),
+            caption=premium_template(
+                "WTS",
+                username_display,
+                products_text,
+                is_vendor
+            ),
         )
 
-        await update.message.reply_text("✅ OPUBLIKOWANO.")
+        await update.message.reply_text("OPUBLIKOWANO.")
         context.user_data.clear()
         return
 
@@ -239,6 +245,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         username_display = (
             f"@{user.username}" if user.username else user.first_name
         ).upper()
+
+        is_vendor = (
+            user.username and user.username.lower() in vendors
+        )
 
         final_text = smart_mask_caps(text)
 
@@ -250,16 +260,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["type"],
                 username_display,
                 final_text,
+                is_vendor
             ),
         )
 
-        await update.message.reply_text("✅ OPUBLIKOWANO.")
+        await update.message.reply_text("OPUBLIKOWANO.")
         context.user_data.clear()
         return
 
-# ==============================
+# ======================
 # MAIN
-# ==============================
+# ======================
 def main():
     app = Application.builder().token(TOKEN).build()
 
@@ -267,7 +278,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("💎 FINAL PRO 999.999 MARKET BOT DZIAŁA")
+    print("FINAL PRO MARKET BOT RUNNING")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
