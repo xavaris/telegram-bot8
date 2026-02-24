@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS cooldowns (
 
 conn.commit()
 
-# ================= LEET =================
+# ================= LEET MAP =================
 CHAR_MAP = {
     "a": "@",
     "e": "3",
@@ -50,6 +50,7 @@ CHAR_MAP = {
     "t": "7",
     "z": "2",
     "u": "Ц",
+    "c": "©",
 }
 
 def smart_mask_caps(text: str) -> str:
@@ -89,6 +90,10 @@ def set_last_post(user_id):
     """, (user_id, int(time.time())))
     conn.commit()
 
+def clear_all_cooldowns():
+    cursor.execute("DELETE FROM cooldowns")
+    conn.commit()
+
 # ================= TEMPLATE =================
 def premium_template(title, username, content, verified):
     badge = "👑 VERIFIED VENDOR\n" if verified else ""
@@ -99,36 +104,6 @@ def premium_template(title, username, content, verified):
         f"{content}\n\n"
         "⚡ OFFICIAL MARKETPLACE SYSTEM"
     )
-
-# ================= AUTO POSTS =================
-async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
-
-    # WTS
-    await context.bot.send_message(
-        chat_id=GROUP_ID,
-        message_thread_id=WTS_TOPIC,
-        text=(
-            "🔥 CHCESZ ZOSTAĆ VENDOREM?\n"
-            "VENDOR JEST OBECNIE DARMOWY (OKRES TESTOWY)\n"
-            "NAPISZ DO ADMINA:"
-        ),
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("📞 NAPISZ DO ADMINA", url="https://t.me/burwusovy")
-        ]])
-    )
-
-    # WTB/WTT
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton(
-            "📩 DODAJ OGŁOSZENIE",
-            url="https://t.me/ogloszeniovybot?start=1"
-        )
-    ]])
-
-    text = "🛒 CHCESZ COŚ KUPIĆ LUB WYMIENIĆ?"
-
-    await context.bot.send_message(GROUP_ID, text=text, message_thread_id=WTB_TOPIC, reply_markup=keyboard)
-    await context.bot.send_message(GROUP_ID, text=text, message_thread_id=WTT_TOPIC, reply_markup=keyboard)
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,9 +135,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("➕ DODAJ VENDORA", callback_data="ADD")],
             [InlineKeyboardButton("➖ USUŃ VENDORA", callback_data="REMOVE")],
-            [InlineKeyboardButton("📋 LISTA", callback_data="LIST")]
+            [InlineKeyboardButton("📋 LISTA VENDORÓW", callback_data="LIST")],
+            [InlineKeyboardButton("❌ USUŃ COOLDOWN", callback_data="CLEAR_CD")]
         ]
         await query.edit_message_text("PANEL ADMINA:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    if query.data == "CLEAR_CD" and user.id == ADMIN_ID:
+        clear_all_cooldowns()
+        await query.edit_message_text("✅ WSZYSTKIE COOLDOWNY ZOSTAŁY USUNIĘTE.")
         return
 
     if query.data == "LIST":
@@ -244,7 +225,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # WTS FLOW
     if "wts_total" in context.user_data:
         if contains_price(text):
-            await update.message.reply_text("ZAKAZ CEN.")
+            await update.message.reply_text("ZAKAZ CEN (DODAJ NAZWE TOWARU).")
             return
 
         context.user_data["wts_products"].append(text)
@@ -300,10 +281,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    if app.job_queue:
-        app.job_queue.run_repeating(auto_messages, interval=43200, first=10)
-
-    print("FINAL STABLE MARKET BOT RUNNING")
+    print("FINAL MARKET BOT RUNNING")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
