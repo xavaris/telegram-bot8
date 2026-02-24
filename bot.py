@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS cooldowns (
 conn.commit()
 
 # =========================
-# LEET MAP
+# PREMIUM LEET MAP (FINAL)
 # =========================
 CHAR_MAP = {
     "a": "@",
@@ -59,6 +59,7 @@ CHAR_MAP = {
     "s": "$",
     "t": "7",
     "z": "2",
+    "u": "Ц",
 }
 
 def smart_mask_caps(text: str) -> str:
@@ -86,10 +87,6 @@ def remove_vendor(username: str):
     cursor.execute("DELETE FROM vendors WHERE username=?", (username,))
     conn.commit()
 
-def get_vendors():
-    cursor.execute("SELECT username FROM vendors")
-    return [row[0] for row in cursor.fetchall()]
-
 def get_last_post(user_id: int):
     cursor.execute("SELECT last_post FROM cooldowns WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
@@ -110,7 +107,7 @@ def set_last_post(user_id: int):
 def premium_template(title, username, content, verified):
     badge = "👑 VERIFIED VENDOR\n" if verified else ""
     return (
-        f"💎 {title} MARKET\n\n"
+        f"💎 {title} MARKET\n"
         f"{badge}"
         f"👤 {username}\n\n"
         f"{content}\n\n"
@@ -122,17 +119,16 @@ def premium_template(title, username, content, verified):
 # =========================
 async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
 
-    # WTS → kontakt do ADMINA (człowiek)
     await context.bot.send_message(
         chat_id=GROUP_ID,
         message_thread_id=WTS_TOPIC,
         text=(
             "🔥 CHCESZ ZOSTAĆ VENDOREM?\n"
+            "VENDOR JEST OBECNIE DARMOWY (OKRES TESTOWY)\n"
             "NAPISZ DO ADMINISTRACJI @burwusovy"
         )
     )
 
-    # WTB / WTT → przycisk do bota z deep link
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton(
             "📩 DODAJ OGŁOSZENIE",
@@ -164,13 +160,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     keyboard = [[
-        InlineKeyboardButton("WTB", callback_data="WTB"),
-        InlineKeyboardButton("WTS", callback_data="WTS"),
-        InlineKeyboardButton("WTT", callback_data="WTT"),
+        InlineKeyboardButton("🛒 WTB", callback_data="WTB"),
+        InlineKeyboardButton("💼 WTS", callback_data="WTS"),
+        InlineKeyboardButton("🔁 WTT", callback_data="WTT"),
     ]]
 
     if update.effective_user.id == ADMIN_ID:
-        keyboard.append([InlineKeyboardButton("ADMIN PANEL", callback_data="ADMIN")])
+        keyboard.append([InlineKeyboardButton("⚙ ADMIN PANEL", callback_data="ADMIN")])
 
     await update.message.reply_text(
         "WYBIERZ TYP OGŁOSZENIA:",
@@ -178,54 +174,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # =========================
-# BUTTONS
+# BUTTON HANDLER
 # =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user = query.from_user
 
-    if query.data == "ADMIN" and user.id == ADMIN_ID:
-        keyboard = [
-            [InlineKeyboardButton("➕ DODAJ VENDORA", callback_data="ADD")],
-            [InlineKeyboardButton("➖ USUŃ VENDORA", callback_data="REMOVE")],
-            [InlineKeyboardButton("📋 LISTA", callback_data="LIST")]
-        ]
-        await query.edit_message_text("PANEL ADMINA:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    if query.data == "LIST":
-        vendors = get_vendors()
-        text = "\n".join(f"@{v}" for v in vendors) or "BRAK"
-        await query.edit_message_text(text)
-        return
-
-    if query.data in ["ADD", "REMOVE"]:
-        context.user_data["admin_action"] = query.data
-        await query.edit_message_text("PODAJ @USERNAME:")
-        return
-
     if query.data == "WTS":
         username = user.username.lower() if user.username else None
 
         if user.id != ADMIN_ID and (not username or not is_vendor(username)):
-            await query.edit_message_text("TYLKO VENDOR MOŻE PUBLIKOWAĆ WTS.")
+            await query.edit_message_text(
+                "TYLKO VENDOR MOŻE PUBLIKOWAĆ WTS.\n"
+                "VENDOR JEST OBECNIE DARMOWY (OKRES TESTOWY)."
+            )
             return
 
         if time.time() - get_last_post(user.id) < 6 * 60 * 60:
             await query.edit_message_text("COOLDOWN 6H.")
             return
 
-        keyboard = []
+        keyboard = [
+            [InlineKeyboardButton("📞 KONTAKT DO ADMINISTRACJI", url="https://t.me/burwusovy")]
+        ]
+
         row = []
         for i in range(1, 11):
-            row.append(InlineKeyboardButton(str(i), callback_data=f"CNT_{i}"))
+            row.append(InlineKeyboardButton(f"📦 {i}", callback_data=f"CNT_{i}"))
             if i % 5 == 0:
                 keyboard.append(row)
                 row = []
 
         await query.edit_message_text(
-            "ILE PRODUKTÓW?",
+            "ILE PRODUKTÓW?\n\nVENDOR JEST OBECNIE DARMOWY (OKRES TESTOWY).",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -251,17 +233,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
     text = update.message.text
-
-    if user.id == ADMIN_ID and "admin_action" in context.user_data:
-        username = text.replace("@", "").lower()
-        if context.user_data["admin_action"] == "ADD":
-            add_vendor(username)
-            await update.message.reply_text("DODANO.")
-        else:
-            remove_vendor(username)
-            await update.message.reply_text("USUNIĘTO.")
-        context.user_data.clear()
-        return
 
     if "wts_total" in context.user_data:
         if contains_price(text):
@@ -327,7 +298,7 @@ def main():
     if app.job_queue:
         app.job_queue.run_repeating(auto_messages, interval=43200, first=10)
 
-    print("FINAL ULTRA PRODUCTION RUNNING")
+    print("FINAL ULTRA MARKET BOT RUNNING")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
