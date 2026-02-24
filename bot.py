@@ -60,14 +60,11 @@ def smart_mask_caps(text: str) -> str:
 
 def contains_price(text: str) -> bool:
     text = text.lower()
-    price_patterns = [
+    patterns = [
         r"\b\d+\s?(zł|pln|usd|eur|\$|€)\b",
         r"\b\d+\b\s?(zł|pln|usd|eur|\$|€)"
     ]
-    for pattern in price_patterns:
-        if re.search(pattern, text):
-            return True
-    return False
+    return any(re.search(p, text) for p in patterns)
 
 # ================= DB HELPERS =================
 def is_vendor(username):
@@ -131,6 +128,37 @@ def premium_template(title, username, content, verified, vendor_date):
 
     return header + vendor_block + body
 
+# ================= AUTO POSTS =================
+async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard_wts = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📞 NAPISZ DO ADMINA", url="https://t.me/burwusovy")],
+        [InlineKeyboardButton("💼 DODAJ OGŁOSZENIE", url="https://t.me/ogloszeniovybot?start=1")]
+    ])
+
+    await context.bot.send_message(
+        chat_id=GROUP_ID,
+        message_thread_id=WTS_TOPIC,
+        text=(
+            "🔥 CHCESZ ZOSTAĆ VENDOREM?\n"
+            "VENDOR JEST OBECNIE DARMOWY (OKRES TESTOWY)\n\n"
+            "JESTEŚ JUŻ VENDOREM?"
+        ),
+        reply_markup=keyboard_wts
+    )
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "📩 DODAJ OGŁOSZENIE",
+            url="https://t.me/ogloszeniovybot?start=1"
+        )
+    ]])
+
+    text = "🛒 CHCESZ COŚ KUPIĆ LUB WYMIENIĆ?"
+
+    await context.bot.send_message(GROUP_ID, text=text, message_thread_id=WTB_TOPIC, reply_markup=keyboard)
+    await context.bot.send_message(GROUP_ID, text=text, message_thread_id=WTT_TOPIC, reply_markup=keyboard)
+
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
@@ -145,22 +173,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         keyboard.append([InlineKeyboardButton("⚙ ADMIN PANEL", callback_data="ADMIN")])
 
-    await update.message.reply_text(
-        "WYBIERZ TYP OGŁOSZENIA:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    await update.message.reply_text("WYBIERZ TYP OGŁOSZENIA:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ================= BUTTONS =================
+# ================= BUTTON HANDLER =================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user = query.from_user
 
+    # ADMIN
     if query.data == "ADMIN" and user.id == ADMIN_ID:
         keyboard = [
             [InlineKeyboardButton("➕ DODAJ VENDORA", callback_data="ADD")],
             [InlineKeyboardButton("➖ USUŃ VENDORA", callback_data="REMOVE")],
-            [InlineKeyboardButton("📋 LISTA VENDORÓW", callback_data="LIST")],
+            [InlineKeyboardButton("📋 LISTA", callback_data="LIST")],
             [InlineKeyboardButton("❌ USUŃ COOLDOWN", callback_data="CLEAR_CD")]
         ]
         await query.edit_message_text("PANEL ADMINA:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -183,13 +209,42 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("PODAJ @USERNAME:")
         return
 
+    # WTS
+    if query.data == "WTS":
+        username = user.username.lower() if user.username else None
+
+        if user.id != ADMIN_ID and (not username or not is_vendor(username)):
+            await query.edit_message_text("TYLKO VENDOR MOŻE PUBLIKOWAĆ WTS.")
+            return
+
+        if time.time() - get_last_post(user.id) < 6*60*60:
+            await query.edit_message_text("COOLDOWN 6H.")
+            return
+
+        keyboard = []
+        row = []
+        for i in range(1, 11):
+            row.append(InlineKeyboardButton(f"📦 {i}", callback_data=f"CNT_{i}"))
+            if i % 5 == 0:
+                keyboard.append(row)
+                row = []
+
+        await query.edit_message_text("ILE PRODUKTÓW?", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    if query.data.startswith("CNT_"):
+        context.user_data["wts_total"] = int(query.data.split("_")[1])
+        context.user_data["wts_products"] = []
+        await query.edit_message_text("PODAJ PRODUKT 1:")
+        return
+
     if query.data in ["WTB", "WTT"]:
         context.user_data["type"] = query.data
         context.user_data["topic"] = WTB_TOPIC if query.data == "WTB" else WTT_TOPIC
         await query.edit_message_text("NAPISZ TREŚĆ:")
         return
 
-# ================= MESSAGES =================
+# ================= MESSAGE HANDLER =================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
@@ -201,18 +256,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         username = text.replace("@", "").lower()
         if context.user_data["admin_action"] == "ADD":
             add_vendor(username)
-            await update.message.reply_text("DODANO VENDORA.")
+            await update.message.reply_text("DODANO.")
         else:
             remove_vendor(username)
-            await update.message.reply_text("USUNIĘTO VENDORA.")
+            await update.message.reply_text("USUNIĘTO.")
         context.user_data.clear()
         return
 
-    if "topic" in context.user_data:
+    if "wts_total" in context.user_data:
+        if contains_price(text):
+            await update.message.reply_text("ZAKAZ CEN.")
+            return
+
+        context.user_data["wts_products"].append(text)
+
+        if len(context.user_data["wts_products"]) < context.user_data["wts_total"]:
+            await update.message.reply_text(f"PODAJ PRODUKT {len(context.user_data['wts_products'])+1}:")
+            return
+
         username_display = f"@{user.username}".upper()
         verified = is_vendor(user.username.lower()) if user.username else False
         vendor_date = get_vendor_date(user.username.lower()) if verified else None
 
+        products_text = "\n".join(f"✓ {smart_mask_caps(p)}" for p in context.user_data["wts_products"])
+
+        await update.get_bot().send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=WTS_TOPIC,
+            photo=LOGO_URL,
+            caption=premium_template("WTS", username_display, products_text, verified, vendor_date)
+        )
+
+        set_last_post(user.id)
+        context.user_data.clear()
+        await update.message.reply_text("OPUBLIKOWANO.")
+        return
+
+    if "topic" in context.user_data:
+        username_display = f"@{user.username}".upper()
         await update.get_bot().send_photo(
             chat_id=GROUP_ID,
             message_thread_id=context.user_data["topic"],
@@ -221,11 +302,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["type"],
                 username_display,
                 smart_mask_caps(text),
-                verified,
-                vendor_date
+                False,
+                None
             )
         )
-
         context.user_data.clear()
         await update.message.reply_text("OPUBLIKOWANO.")
 
@@ -237,7 +317,10 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("FINAL PREMIUM VERSION RUNNING")
+    if app.job_queue:
+        app.job_queue.run_repeating(auto_messages, interval=43200, first=10)
+
+    print("FINAL COMPLETE VERSION RUNNING")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
