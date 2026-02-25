@@ -236,7 +236,7 @@ async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
     keyboard_wts = InlineKeyboardMarkup([
         [InlineKeyboardButton("📞 NAPISZ DO ADMINA", url="https://t.me/burwusovy")],
         [InlineKeyboardButton("💼 DODAJ OGŁOSZENIE",
-                              url=f"https://t.me/ogloszeniovybot?start=1")]
+                              url=f"https://t.me/{BOT_USERNAME}?start=1")]
     ])
 
     await context.bot.send_message(
@@ -569,3 +569,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
