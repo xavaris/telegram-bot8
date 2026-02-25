@@ -25,8 +25,7 @@ WTS_TOPIC = int(os.getenv("WTS"))
 WTT_TOPIC = int(os.getenv("WTT"))
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 LOGO_URL = os.getenv("LOGO_URL")
-
-BOT_USERNAME = "ogloszeniovybot"  # zmień jeśli inna nazwa
+BOT_USERNAME = os.getenv("BOT_USERNAME")
 
 # ================= DATABASE =================
 conn = sqlite3.connect("market.db", check_same_thread=False)
@@ -37,7 +36,8 @@ CREATE TABLE IF NOT EXISTS vendors (
     username TEXT PRIMARY KEY,
     added_at TEXT,
     city TEXT,
-    options TEXT
+    options TEXT,
+    posts INTEGER DEFAULT 0
 )
 """)
 
@@ -52,32 +52,95 @@ conn.commit()
 
 # ================= LEET MAP =================
 CHAR_MAP = {
-    "a": "@", "e": "3", "i": "1", "o": "0",
-    "s": "$", "t": "7", "z": "2", "u": "Ц", "c": "©"
+    "a": "@",
+    "e": "€",
+    "i": "ı",
+    "o": "0",
+    "s": "$",
+    "t": "τ",
+    "z": "2",
+    "u": "Ц",
+    "c": "©"
 }
 
-PRODUCT_EMOJI = {
-    "3cmc": "💎", "4mmc": "💎", "mmc": "💎", "cmc": "💎",
-    "weed": "🌿", "koks": "❄️", "buch": "🔥",
-    "xanax": "💊", "lsd": "🧪"
+REVERSE_LEET = {
+    "@": "a",
+    "€": "e",
+    "ı": "i",
+    "0": "o",
+    "$": "s",
+    "τ": "t",
+    "2": "z",
+    "ц": "u",
+    "©": "c"
 }
 
-# ================= UTIL =================
 def smart_mask_caps(text: str) -> str:
     return "".join(CHAR_MAP.get(c.lower(), c) for c in text).upper()
 
+def reverse_leet(text: str) -> str:
+    result = ""
+    for char in text.lower():
+        result += REVERSE_LEET.get(char, char)
+    return result
+
+def normalize_text(text: str) -> str:
+    text = reverse_leet(text)
+    text = text.lower()
+    text = text.replace("ł", "l").replace("ó", "o").replace("ą", "a")
+    text = text.replace("ę", "e").replace("ś", "s").replace("ż", "z")
+    text = text.replace("ź", "z").replace("ć", "c").replace("ń", "n")
+    text = re.sub(r"[^a-z0-9]", "", text)
+    return text
+
+# ================= ULTRA PRODUCT DETECTION =================
 def get_product_emoji(name: str) -> str:
-    for key, emoji in PRODUCT_EMOJI.items():
-        if key in name.lower():
-            return emoji
+    normalized = normalize_text(name)
+
+    product_groups = {
+        "💎": ["3cmc", "4mmc", "cmc", "mmc", "kryx", "krysztal", "ice", "mefedron"],
+        "🌿": ["weed", "buch", "jazz", "jaaz", "trawa", "ziolo", "zielone"],
+        "🍫": ["hasz", "haszysz", "czekolada", "haszyk"],
+        "❄️": ["koks", "kokos", "koko", "koperta", "coke", "cocaina", "kokaina"],
+        "💊": ["xanax", "alpra", "alprazolam", "medikinet",
+               "clony", "clonozepan", "clonazepam",
+               "rivotril", "diazepam"]
+    }
+
+    for emoji, keywords in product_groups.items():
+        for key in keywords:
+            if key in normalized:
+                return emoji
+
     return "📦"
 
-def contains_price(text: str) -> bool:
-    patterns = [
-        r"\b\d+\s?(zł|pln|usd|eur|\$|€)\b",
-        r"\b\d+\b\s?(zł|pln|usd|eur|\$|€)"
-    ]
-    return any(re.search(p, text.lower()) for p in patterns)
+# ================= HARDCORE PRICE DETECTOR =================
+def contains_price_hardcore(text: str) -> bool:
+    lines = text.split("\n")
+
+    for line in lines:
+        clean = reverse_leet(line.lower().strip())
+        normalized = re.sub(r"[^a-z0-9\s\-:]", "", clean)
+
+        if re.fullmatch(r"\d+(cmc|mmc|cb)", normalized):
+            continue
+
+        if re.search(r"\b\d+\s*(g|szt|tabs|ml)?\s*[-:]\s*\d{2,5}\b", normalized):
+            return True
+
+        if re.search(r"\b\d+\s*(g|szt|tabs|ml)\s+\d{2,5}\b", normalized):
+            return True
+
+        if re.fullmatch(r"\d{2,5}", normalized):
+            return True
+
+        if re.search(r"\b\d{2,5}\s*(zł|pln|usd|eur|\$|€)\b", normalized):
+            return True
+
+        if re.search(r"\b\d\s\d\s\d\b", normalized):
+            return True
+
+    return False
 
 # ================= DB HELPERS =================
 def get_vendor(username):
@@ -88,8 +151,8 @@ def add_vendor(username):
     if get_vendor(username):
         return False
     now = datetime.now().strftime("%d.%m.%Y")
-    cursor.execute("INSERT INTO vendors VALUES(?,?,?,?)",
-                   (username, now, None, None))
+    cursor.execute("INSERT INTO vendors VALUES(?,?,?,?,?)",
+                   (username, now, None, None, 0))
     conn.commit()
     return True
 
@@ -98,13 +161,20 @@ def remove_vendor(username):
     conn.commit()
 
 def list_vendors():
-    cursor.execute("SELECT username, added_at FROM vendors")
+    cursor.execute("SELECT username, added_at, posts FROM vendors")
     return cursor.fetchall()
 
 def update_vendor_settings(username, city, options):
     cursor.execute(
         "UPDATE vendors SET city=?, options=? WHERE username=?",
         (city, ",".join(options), username)
+    )
+    conn.commit()
+
+def increment_posts(username):
+    cursor.execute(
+        "UPDATE vendors SET posts = posts + 1 WHERE username=?",
+        (username,)
     )
     conn.commit()
 
@@ -126,65 +196,39 @@ def clear_all_cooldowns():
     cursor.execute("DELETE FROM cooldowns")
     conn.commit()
 
-# ================= TEMPLATE =================
+# ================= PREMIUM TEMPLATE =================
 def premium_template(title, username, content, vendor_data, city, options):
 
     badge = ""
     if vendor_data:
-        badge = f"👑 VERIFIED VENDOR\n🗓 OD: {vendor_data[1]}\n\n"
+        badge = (
+            "<b>👑 VERIFIED VENDOR</b>\n"
+            f"<b>🗓 OD:</b> {vendor_data[1]}\n"
+            f"<b>📊 OGŁOSZEŃ:</b> {vendor_data[4]}\n\n"
+        )
 
     option_text = ""
     if options:
-        option_text = "  |  " + "  ".join(options)
+        option_text = " | " + " | ".join(options)
 
-    profile = f"👤 {username}  |  📍 {city}{option_text}  |  #3CITY"
+    profile = f"<b>👤 {username}</b>\n<b>📍 {city}{option_text} | #3CITY</b>"
 
     hashtag = ""
     if title == "WTB":
-        hashtag = "\n#WTB"
+        hashtag = "\n<b>#WTB</b>"
     if title == "WTT":
-        hashtag = "\n#WTT"
+        hashtag = "\n<b>#WTT</b>"
 
     return (
-        f"💎 {title} MARKET\n\n"
+        f"<b>       💎 {title} MARKET 💎</b>\n\n"
         f"{badge}"
         f"{profile}\n\n"
-        "────────────\n"
-        f"{content}\n"
-        "────────────"
+        "<code>───────────────</code>\n"
+        f"<b>{content}</b>\n"
+        "<code>───────────────</code>"
         f"{hashtag}\n\n"
-        "⚡ OFFICIAL MARKETPLACE"
+        "<b>⚡ OFFICIAL MARKETPLACE</b>"
     )
-
-# ================= ADMIN COMMANDS =================
-async def cmd_addvendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("UŻYJ: /addvendor @username")
-        return
-    username = context.args[0].replace("@","").lower()
-    if add_vendor(username):
-        await update.message.reply_text("VENDOR DODANY.")
-    else:
-        await update.message.reply_text("TEN VENDOR JUŻ ISTNIEJE.")
-
-async def cmd_removevendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("UŻYJ: /removevendor @username")
-        return
-    username = context.args[0].replace("@","").lower()
-    remove_vendor(username)
-    await update.message.reply_text("VENDOR USUNIĘTY.")
-
-async def cmd_listvendors(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    vendors = list_vendors()
-    text = "\n".join([f"@{v[0]} | OD {v[1]}" for v in vendors]) or "BRAK"
-    await update.message.reply_text(text)
 
 # ================= AUTO SYSTEM =================
 async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
@@ -198,27 +242,9 @@ async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=GROUP_ID,
         message_thread_id=WTS_TOPIC,
-        text="🔥 CHCESZ ZOSTAĆ VENDOREM?\nVENDOR JEST DARMOWY (OKRES TESTOWY)",
+        text="<b>🔥 CHCESZ ZOSTAĆ VENDOREM?</b>\nVENDOR JEST DARMOWY (OKRES TESTOWY)",
+        parse_mode="HTML",
         reply_markup=keyboard_wts
-    )
-
-    keyboard_general = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 DODAJ OGŁOSZENIE",
-                              url=f"https://t.me/{BOT_USERNAME}?start=1")]
-    ])
-
-    await context.bot.send_message(
-        chat_id=GROUP_ID,
-        message_thread_id=WTB_TOPIC,
-        text="🛒 CHCESZ COŚ KUPIĆ?",
-        reply_markup=keyboard_general
-    )
-
-    await context.bot.send_message(
-        chat_id=GROUP_ID,
-        message_thread_id=WTT_TOPIC,
-        text="🔁 CHCESZ COŚ WYMIENIĆ?",
-        reply_markup=keyboard_general
     )
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -235,9 +261,45 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton("⚙ ADMIN PANEL", callback_data="ADMIN")])
 
     await update.message.reply_text(
-        "WYBIERZ TYP OGŁOSZENIA:",
+        "<b>WYBIERZ TYP OGŁOSZENIA:</b>",
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+# ================= ADMIN COMMANDS =================
+async def cmd_addvendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("<b>UŻYJ:</b> /addvendor @username", parse_mode="HTML")
+        return
+    username = context.args[0].replace("@", "").lower()
+    if add_vendor(username):
+        await update.message.reply_text("<b>VENDOR DODANY.</b>", parse_mode="HTML")
+    else:
+        await update.message.reply_text("<b>VENDOR JUŻ ISTNIEJE.</b>", parse_mode="HTML")
+
+async def cmd_removevendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("<b>UŻYJ:</b> /removevendor @username", parse_mode="HTML")
+        return
+    username = context.args[0].replace("@", "").lower()
+    remove_vendor(username)
+    await update.message.reply_text("<b>VENDOR USUNIĘTY.</b>", parse_mode="HTML")
+
+async def cmd_listvendors(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    vendors = list_vendors()
+    if not vendors:
+        await update.message.reply_text("<b>BRAK VENDORÓW.</b>", parse_mode="HTML")
+        return
+    text = ""
+    for v in vendors:
+        text += f"<b>@{v[0]}</b> | OD {v[1]} | OGŁOSZEŃ: {v[2]}\n"
+    await update.message.reply_text(text, parse_mode="HTML")
 
 # ================= ADMIN PANEL INLINE =================
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -248,8 +310,11 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📋 LISTA VENDORÓW", callback_data="LIST_VENDOR")],
         [InlineKeyboardButton("❌ USUŃ COOLDOWN", callback_data="CLEAR_CD")]
     ]
-    await query.edit_message_text("PANEL ADMINA:",
-                                  reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text(
+        "<b>PANEL ADMINA</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 # ================= CALLBACK HANDLER =================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -264,81 +329,59 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "CLEAR_CD" and user.id == ADMIN_ID:
         clear_all_cooldowns()
-        await query.edit_message_text("COOLDOWNY USUNIĘTE.")
+        await query.edit_message_text("<b>COOLDOWNY USUNIĘTE.</b>", parse_mode="HTML")
         return
 
     if query.data == "LIST_VENDOR" and user.id == ADMIN_ID:
         vendors = list_vendors()
-        text = "\n".join([f"@{v[0]} | OD {v[1]}" for v in vendors]) or "BRAK"
-        await query.edit_message_text(text)
+        text = ""
+        for v in vendors:
+            text += f"<b>@{v[0]}</b> | OD {v[1]} | OGŁOSZEŃ: {v[2]}\n"
+        await query.edit_message_text(text or "<b>BRAK.</b>", parse_mode="HTML")
         return
 
     if query.data in ["ADD_VENDOR", "REMOVE_VENDOR"] and user.id == ADMIN_ID:
         context.user_data["admin_action"] = query.data
-        await query.edit_message_text("PODAJ @USERNAME:")
+        await query.edit_message_text("<b>PODAJ @USERNAME:</b>", parse_mode="HTML")
         return
 
     # ================= WTS =================
     if query.data == "WTS":
         if not user.username:
-            await query.edit_message_text("USTAW USERNAME NA TELEGRAMIE.")
+            await query.edit_message_text("<b>USTAW USERNAME.</b>", parse_mode="HTML")
             return
 
         vendor = get_vendor(user.username.lower())
         if not vendor:
-            await query.edit_message_text("TYLKO VENDOR.")
+            await query.edit_message_text("<b>TYLKO VENDOR.</b>", parse_mode="HTML")
             return
 
         if time.time() - get_last_post(user.id) < 6*60*60:
-            await query.edit_message_text("COOLDOWN 6H.")
+            await query.edit_message_text("<b>COOLDOWN 6H.</b>", parse_mode="HTML")
             return
 
         context.user_data["vendor"] = vendor
-
-        # pytanie o domyślne ustawienia
-        if vendor[2]:
-            keyboard = [
-                [InlineKeyboardButton("✅ UŻYJ DOMYŚLNYCH", callback_data="USE_DEFAULT")],
-                [InlineKeyboardButton("⚙️ ZMIEŃ", callback_data="CHANGE_SETTINGS")]
-            ]
-            await query.edit_message_text(
-                "UŻYĆ ZAPISANYCH USTAWIEŃ?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            return
-
-        await ask_product_count(query)
-        return
-
-    if query.data == "USE_DEFAULT":
-        await ask_product_count(query)
-        return
-
-    if query.data == "CHANGE_SETTINGS":
-        context.user_data["vendor"] = None
         await ask_product_count(query)
         return
 
     if query.data.startswith("CNT_"):
         context.user_data["wts_total"] = int(query.data.split("_")[1])
         context.user_data["wts_products"] = []
-        await query.edit_message_text("PODAJ PRODUKT 1:")
+        await query.edit_message_text("<b>PODAJ PRODUKT 1:</b>", parse_mode="HTML")
         return
 
-    # CITY
     if query.data in ["CITY_GDY", "CITY_GDA", "CITY_SOP"]:
         context.user_data["city"] = query.data
         context.user_data["options"] = []
-
         keyboard = [
             [InlineKeyboardButton("✈️ DOLOT", callback_data="OPT_DOLOT")],
             [InlineKeyboardButton("🚗 UBER PAKA", callback_data="OPT_UBER")],
             [InlineKeyboardButton("❌ BRAK", callback_data="OPT_BRAK")],
             [InlineKeyboardButton("✅ PUBLIKUJ", callback_data="OPT_DONE")]
         ]
-
         await query.edit_message_text(
-            "WYBIERZ OPCJE (MOŻESZ DWIE):",
+            "<b>WYBIERZ OPCJE:</b>",
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -359,7 +402,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ================= WTB / WTT =================
     if query.data in ["WTB", "WTT"]:
         context.user_data["type"] = query.data
-        await query.edit_message_text("NAPISZ TREŚĆ:")
+        await query.edit_message_text("<b>NAPISZ TREŚĆ:</b>", parse_mode="HTML")
         return
 
 
@@ -376,24 +419,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         username = text.replace("@", "").lower()
         if context.user_data["admin_action"] == "ADD_VENDOR":
             add_vendor(username)
-            await update.message.reply_text("DODANO.")
+            await update.message.reply_text("<b>DODANO.</b>", parse_mode="HTML")
         else:
             remove_vendor(username)
-            await update.message.reply_text("USUNIĘTO.")
+            await update.message.reply_text("<b>USUNIĘTO.</b>", parse_mode="HTML")
         context.user_data.clear()
         return
 
-    # WTS PRODUCTS FLOW
+    # WTS PRODUCTS
     if "wts_total" in context.user_data:
-        if contains_price(text):
-            await update.message.reply_text("ZAKAZ CEN.")
+        if contains_price_hardcore(text):
+            await update.message.reply_text("<b>❌ ZAKAZ PODAWANIA CEN.</b>", parse_mode="HTML")
             return
 
         context.user_data["wts_products"].append(text)
 
         if len(context.user_data["wts_products"]) < context.user_data["wts_total"]:
             await update.message.reply_text(
-                f"PODAJ PRODUKT {len(context.user_data['wts_products'])+1}:"
+                f"<b>PODAJ PRODUKT {len(context.user_data['wts_products'])+1}:</b>",
+                parse_mode="HTML"
             )
             return
 
@@ -404,7 +448,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await update.message.reply_text(
-            "WYBIERZ MIASTO:",
+            "<b>WYBIERZ MIASTO:</b>",
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -420,7 +465,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await update.message.reply_text(
-            "WYBIERZ MIASTO:",
+            "<b>WYBIERZ MIASTO:</b>",
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -435,7 +481,8 @@ async def ask_product_count(query):
             keyboard.append(row)
             row = []
     await query.edit_message_text(
-        "ILE PRODUKTÓW?",
+        "<b>ILE PRODUKTÓW?</b>",
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -468,20 +515,16 @@ async def publish(update, context):
         )
         title = "WTS"
         topic = WTS_TOPIC
-        set_last_post(user.id)
 
-        if user.username:
-            update_vendor_settings(
-                user.username.lower(),
-                city,
-                context.user_data.get("options", [])
-            )
+        set_last_post(user.id)
+        increment_posts(user.username.lower())
+
     else:
         content = smart_mask_caps(context.user_data["content"])
         title = context.user_data["type"]
         topic = WTB_TOPIC if title == "WTB" else WTT_TOPIC
 
-    await update.get_bot().send_photo(
+    msg = await update.get_bot().send_photo(
         chat_id=GROUP_ID,
         message_thread_id=topic,
         photo=LOGO_URL,
@@ -492,11 +535,20 @@ async def publish(update, context):
             vendor,
             city,
             options
-        )
+        ),
+        parse_mode="HTML"
     )
 
-    context.user_data.clear()
+    # AUTO DELETE 48H
+    async def delete_later(ctx):
+        try:
+            await ctx.bot.delete_message(GROUP_ID, msg.message_id)
+        except:
+            pass
 
+    context.application.job_queue.run_once(delete_later, 172800)
+
+    context.user_data.clear()
 
 # ================= MAIN =================
 def main():
@@ -514,7 +566,6 @@ def main():
         app.job_queue.run_repeating(auto_messages, interval=43200, first=60)
 
     app.run_polling(drop_pending_updates=True)
-
 
 if __name__ == "__main__":
     main()
