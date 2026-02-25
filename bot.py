@@ -220,7 +220,7 @@ async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
         text="🔁 CHCESZ COŚ WYMIENIĆ?",
         reply_markup=keyboard_general
     )
-    # ================= START =================
+# ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
