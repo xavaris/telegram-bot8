@@ -1,572 +1,1287 @@
+# ================= Część 1 z 6 =================
+# INFRASTRUCTURE + ENV VALIDATION + HARDENED SQLITE + ERROR HANDLER
+
 import os
-import re
+import sys
+import logging
+import signal
 import sqlite3
+from typing import List, Optional
+from contextlib import contextmanager
+from telegram.ext import Application
+
+# ============================================================
+# LOGGING (Railway compatible – stdout)
+# ============================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    stream=sys.stdout,
+)
+
+logger = logging.getLogger("MARKET_BOT")
+
+# ============================================================
+# ENV VALIDATION (FAIL FAST)
+# ============================================================
+
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required ENV variable: {name}")
+    return value
+
+
+TOKEN = require_env("KEY")
+GROUP_ID = int(require_env("GROUP_ID"))
+WTS_TOPIC = int(require_env("WTS"))
+WTB_TOPIC = int(require_env("WTB"))
+WTT_TOPIC = int(require_env("WTT"))
+LOGO_URL = require_env("LOGO_URL")
+BOT_USERNAME = require_env("BOT_USERNAME")
+
+# MULTI ADMIN
+ADMIN_IDS: List[int] = [
+    int(x.strip())
+    for x in require_env("ADMIN_IDS").split(",")
+    if x.strip().isdigit()
+]
+
+# Bootstrap lists (optional ENV)
+BOOTSTRAP_VENDORS = [
+    x.strip().lower()
+    for x in os.getenv("VENDORS", "").split(",")
+    if x.strip()
+]
+
+BOOTSTRAP_VIP = [
+    x.strip().lower()
+    for x in os.getenv("VIP_VENDORS", "").split(",")
+    if x.strip()
+]
+
+logger.info("ENV loaded successfully")
+logger.info(f"Admins: {ADMIN_IDS}")
+logger.info(f"Bootstrap vendors: {BOOTSTRAP_VENDORS}")
+logger.info(f"Bootstrap VIP: {BOOTSTRAP_VIP}")
+
+# ============================================================
+# SQLITE HARDENED LAYER
+# ============================================================
+
+DB_PATH = "market.db"
+
+
+def create_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    return conn
+
+
+@contextmanager
+def db_cursor():
+    conn = create_connection()
+    cursor = conn.cursor()
+    try:
+        yield cursor
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Database error", exc_info=e)
+        raise
+    finally:
+        conn.close()
+
+
+# ============================================================
+# DATABASE INIT (TABLES + SAFE MIGRATION STYLE)
+# ============================================================
+
+def init_db():
+    with db_cursor() as cur:
+
+        # VENDORS
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS vendors (
+            username TEXT PRIMARY KEY,
+            role TEXT NOT NULL,
+            added_at TEXT,
+            posts INTEGER DEFAULT 0,
+            last_content TEXT,
+            auto_enabled INTEGER DEFAULT 0,
+            last_auto_post INTEGER DEFAULT 0,
+            interest_total INTEGER DEFAULT 0
+        )
+        """)
+
+        # COOLDOWNS
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS cooldowns (
+            user_id INTEGER PRIMARY KEY,
+            last_post INTEGER
+        )
+        """)
+
+        # INTERESTS
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS interests (
+            message_id INTEGER,
+            user_id INTEGER,
+            PRIMARY KEY(message_id, user_id)
+        )
+        """)
+
+        # AUDIT LOG
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT,
+            username TEXT,
+            timestamp INTEGER,
+            metadata TEXT
+        )
+        """)
+
+    logger.info("Database initialized (WAL mode active)")
+
+
+# ============================================================
+# GLOBAL ERROR HANDLER
+# ============================================================
+
+async def global_error_handler(update, context):
+    logger.exception(
+        "Unhandled exception occurred",
+        exc_info=context.error
+    )
+
+
+# ============================================================
+# GRACEFUL SHUTDOWN (Railway SIGTERM safe)
+# ============================================================
+
+def setup_signal_handlers(application: Application):
+
+    def shutdown_handler(signum, frame):
+        logger.warning(f"Received shutdown signal: {signum}")
+        try:
+            application.stop()
+        except Exception as e:
+            logger.exception("Error during shutdown", exc_info=e)
+
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
+
+
+# ============================================================
+# APPLICATION FACTORY
+# ============================================================
+
+def create_application() -> Application:
+    app = Application.builder().token(TOKEN).build()
+    app.add_error_handler(global_error_handler)
+    setup_signal_handlers(app)
+    return app
+    # ================= Część 2 z 6 =================
+# ROLE MANAGER + COOLDOWN + AUDIT LOG + BOOTSTRAP + RATE LIMIT
+
+import re
 import time
 from datetime import datetime
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from typing import Optional, Tuple
 
-# ================= ENV =================
-TOKEN = os.getenv("KEY")
-GROUP_ID = int(os.getenv("GROUP_ID"))
-WTB_TOPIC = int(os.getenv("WTB"))
-WTS_TOPIC = int(os.getenv("WTS"))
-WTT_TOPIC = int(os.getenv("WTT"))
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
-LOGO_URL = os.getenv("LOGO_URL")
-BOT_USERNAME = os.getenv("BOT_USERNAME")
+# ============================================================
+# USERNAME VALIDATION (ANTI-INJECTION)
+# ============================================================
 
-# ================= DATABASE =================
-conn = sqlite3.connect("market.db", check_same_thread=False)
-cursor = conn.cursor()
+USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_]{5,32}$")
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS vendors (
-    username TEXT PRIMARY KEY,
-    added_at TEXT,
-    city TEXT,
-    options TEXT,
-    posts INTEGER DEFAULT 0
-)
-""")
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS cooldowns (
-    user_id INTEGER PRIMARY KEY,
-    last_post INTEGER
-)
-""")
+def validate_username(username: str) -> bool:
+    if not username:
+        return False
+    username = username.replace("@", "")
+    return bool(USERNAME_REGEX.fullmatch(username))
 
-conn.commit()
 
-# ================= LEET MAP =================
+# ============================================================
+# AUDIT LOG
+# ============================================================
+
+def log_action(action: str, username: str, metadata: str = ""):
+    with db_cursor() as cur:
+        cur.execute("""
+            INSERT INTO audit_log(action, username, timestamp, metadata)
+            VALUES (?, ?, ?, ?)
+        """, (
+            action,
+            username,
+            int(time.time()),
+            metadata
+        ))
+
+
+# ============================================================
+# ROLE MANAGER
+# ============================================================
+
+class RoleManager:
+
+    @staticmethod
+    def is_admin(user_id: int) -> bool:
+        return user_id in ADMIN_IDS
+
+    @staticmethod
+    def get_vendor(username: str) -> Optional[Tuple]:
+        with db_cursor() as cur:
+            cur.execute("SELECT * FROM vendors WHERE username=?", (username.lower(),))
+            return cur.fetchone()
+
+    @staticmethod
+    def is_vendor(username: str) -> bool:
+        row = RoleManager.get_vendor(username)
+        return bool(row and row[1] in ("vendor", "vip"))
+
+    @staticmethod
+    def is_vip(username: str) -> bool:
+        row = RoleManager.get_vendor(username)
+        return bool(row and row[1] == "vip")
+
+    @staticmethod
+    def add_vendor(username: str, role: str = "vendor"):
+        if not validate_username(username):
+            return False
+
+        with db_cursor() as cur:
+            cur.execute("""
+                INSERT OR IGNORE INTO vendors
+                (username, role, added_at)
+                VALUES (?, ?, ?)
+            """, (
+                username.lower(),
+                role,
+                datetime.now().strftime("%d.%m.%Y")
+            ))
+
+        log_action("add_vendor", username, role)
+        return True
+
+    @staticmethod
+    def remove_vendor(username: str):
+        with db_cursor() as cur:
+            cur.execute("DELETE FROM vendors WHERE username=?", (username.lower(),))
+        log_action("remove_vendor", username)
+
+    @staticmethod
+    def set_vip(username: str):
+        with db_cursor() as cur:
+            cur.execute("""
+                UPDATE vendors
+                SET role='vip', auto_enabled=0
+                WHERE username=?
+            """, (username.lower(),))
+        log_action("make_vip", username)
+
+    @staticmethod
+    def remove_vip(username: str):
+        with db_cursor() as cur:
+            cur.execute("""
+                UPDATE vendors
+                SET role='vendor', auto_enabled=0
+                WHERE username=?
+            """, (username.lower(),))
+        log_action("remove_vip", username)
+
+    @staticmethod
+    def increment_posts(username: str):
+        with db_cursor() as cur:
+            cur.execute("""
+                UPDATE vendors
+                SET posts = posts + 1
+                WHERE username=?
+            """, (username.lower(),))
+
+    @staticmethod
+    def update_last_content(username: str, content: str):
+        with db_cursor() as cur:
+            cur.execute("""
+                UPDATE vendors
+                SET last_content=?
+                WHERE username=?
+            """, (content, username.lower()))
+
+    @staticmethod
+    def get_last_content(username: str) -> Optional[str]:
+        with db_cursor() as cur:
+            cur.execute("""
+                SELECT last_content FROM vendors
+                WHERE username=?
+            """, (username.lower(),))
+            row = cur.fetchone()
+            return row[0] if row else None
+
+    @staticmethod
+    def update_interest_total(username: str, increment: int = 1):
+        with db_cursor() as cur:
+            cur.execute("""
+                UPDATE vendors
+                SET interest_total = interest_total + ?
+                WHERE username=?
+            """, (increment, username.lower()))
+
+
+# ============================================================
+# COOLDOWN SYSTEM
+# ============================================================
+
+def get_last_post(user_id: int) -> int:
+    with db_cursor() as cur:
+        cur.execute("SELECT last_post FROM cooldowns WHERE user_id=?", (user_id,))
+        row = cur.fetchone()
+        return row[0] if row else 0
+
+
+def set_last_post(user_id: int):
+    with db_cursor() as cur:
+        cur.execute("""
+            INSERT INTO cooldowns(user_id, last_post)
+            VALUES(?, ?)
+            ON CONFLICT(user_id)
+            DO UPDATE SET last_post=excluded.last_post
+        """, (user_id, int(time.time())))
+
+
+def remove_cooldown(user_id: int):
+    with db_cursor() as cur:
+        cur.execute("DELETE FROM cooldowns WHERE user_id=?", (user_id,))
+
+
+# ============================================================
+# BOOTSTRAP ROLES FROM ENV
+# ============================================================
+
+def bootstrap_roles():
+    for username in BOOTSTRAP_VENDORS:
+        RoleManager.add_vendor(username, role="vendor")
+
+    for username in BOOTSTRAP_VIP:
+        RoleManager.add_vendor(username, role="vip")
+
+    logger.info("Bootstrap roles completed")
+
+
+# ============================================================
+# RATE LIMIT (ANTI-FLOOD)
+# ============================================================
+
+USER_RATE_LIMIT = {}  # user_id -> timestamp
+RATE_LIMIT_SECONDS = 2
+
+
+def check_rate_limit(user_id: int) -> bool:
+    now = time.time()
+    last = USER_RATE_LIMIT.get(user_id, 0)
+
+    if now - last < RATE_LIMIT_SECONDS:
+        return False
+
+    USER_RATE_LIMIT[user_id] = now
+    return True
+    # ================= Część 3 z 6 =================
+# ULTRA DETECTION ENGINE (HARDENED + CONTEXT SAFE)
+
+import unicodedata
+import difflib
+import re
+
+# ============================================================
+# FULL CHAR MAP
+# ============================================================
+
 CHAR_MAP = {
     "a": "@",
+    "c": "©",
     "e": "€",
-    "i": "ı",
-    "o": "0",
+    "i": "l",
     "s": "$",
     "t": "τ",
-    "z": "2",
     "u": "Ц",
-    "c": "©"
+    "o": "Ø",
+    "p": "₱",
+    "w": "₩",
+    "x": "Ж",
+    "y": "¥",
+    "z": "Ƶ",
 }
 
-REVERSE_LEET = {
-    "@": "a",
-    "€": "e",
-    "ı": "i",
+REVERSE_MAP = {v.lower(): k for k, v in CHAR_MAP.items()}
+
+DIGIT_TO_LETTER = {
     "0": "o",
-    "$": "s",
-    "τ": "t",
-    "2": "z",
-    "ц": "u",
-    "©": "c"
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t"
 }
 
-def smart_mask_caps(text: str) -> str:
-    return "".join(CHAR_MAP.get(c.lower(), c) for c in text).upper()
+ZERO_WIDTH_PATTERN = re.compile(r"[\u200B-\u200D\uFEFF\u2060]")
 
-def reverse_leet(text: str) -> str:
-    result = ""
-    for char in text.lower():
-        result += REVERSE_LEET.get(char, char)
-    return result
+# ============================================================
+# HOMOGLYPH BASIC NORMALIZATION (CYRILLIC → LATIN)
+# ============================================================
 
-def normalize_text(text: str) -> str:
-    text = reverse_leet(text)
-    text = text.lower()
-    text = text.replace("ł", "l").replace("ó", "o").replace("ą", "a")
-    text = text.replace("ę", "e").replace("ś", "s").replace("ż", "z")
-    text = text.replace("ź", "z").replace("ć", "c").replace("ń", "n")
-    text = re.sub(r"[^a-z0-9]", "", text)
-    return text
+HOMOGLYPH_MAP = {
+    "а": "a",  # cyrylica
+    "о": "o",
+    "е": "e",
+    "р": "p",
+    "с": "c",
+    "х": "x",
+    "у": "y",
+    "і": "i",
+    "ӏ": "l"
+}
 
-# ================= ULTRA PRODUCT DETECTION =================
-def get_product_emoji(name: str) -> str:
-    normalized = normalize_text(name)
+# ============================================================
+# ULTRA CATEGORIES
+# ============================================================
 
-    product_groups = {
-        "💎": ["3cmc", "4mmc", "cmc", "mmc", "kryx", "krysztal", "ice", "mefedron"],
-        "🌿": ["weed", "buch", "jazz", "jaaz", "trawa", "ziolo", "zielone"],
-        "🍫": ["hasz", "haszysz", "czekolada", "haszyk"],
-        "❄️": ["koks", "kokos", "koko", "koperta", "coke", "cocaina", "kokaina"],
-        "💊": ["xanax", "alpra", "alprazolam", "medikinet",
-               "clony", "clonozepan", "clonazepam",
-               "rivotril", "diazepam"]
-    }
+ULTRA_CATEGORIES = {
+    "💎": ["mewa", "ice", "kryx", "kryształ", "krystal", "crystal"],
+    "🌿": ["weed", "buch", "jazz", "jaaz", "zioło", "trawa"],
+    "❄": ["3cmc", "4mmc", "feta"],
+    "🍫": ["hasz", "haszysz", "hash"],
+    "🧂": ["koks", "koko", "kokos", "cocaine"],
+    "💊": ["clony", "clonozepan", "xanax", "medikinet", "pixy", "pigle", "piguły"]
+}
 
-    for emoji, keywords in product_groups.items():
-        for key in keywords:
-            if key in normalized:
-                return emoji
+# Whitelist kontekstowa (zapobiega false positive)
+SAFE_CONTEXT = [
+    "ice cream",
+    "crystal clear",
+    "weed control",
+    "hashmap",
+    "feta cheese"
+]
 
-    return "📦"
+# ============================================================
+# NORMALIZATION PIPELINE
+# ============================================================
 
-# ================= HARDCORE PRICE DETECTOR =================
-def contains_price_hardcore(text: str) -> bool:
-    lines = text.split("\n")
+def normalize_ultra(text: str) -> str:
+    text = ZERO_WIDTH_PATTERN.sub("", text)
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
 
-    for line in lines:
-        clean = reverse_leet(line.lower().strip())
-        normalized = re.sub(r"[^a-z0-9\s\-:]", "", clean)
+    # homoglyph replace
+    text = "".join(HOMOGLYPH_MAP.get(c, c) for c in text)
 
-        if re.fullmatch(r"\d+(cmc|mmc|cb)", normalized):
-            continue
+    # digit → letter
+    for d, l in DIGIT_TO_LETTER.items():
+        text = text.replace(d, l)
 
-        if re.search(r"\b\d+\s*(g|szt|tabs|ml)?\s*[-:]\s*\d{2,5}\b", normalized):
+    # reverse char map
+    text = "".join(REVERSE_MAP.get(c.lower(), c) for c in text)
+
+    return text.lower()
+
+
+# ============================================================
+# FUZZY MATCH
+# ============================================================
+
+def dynamic_threshold(word: str) -> float:
+    l = len(word)
+    if l <= 4:
+        return 0.9
+    elif l <= 7:
+        return 0.8
+    return 0.75
+
+
+def fuzzy_match(word: str, keyword: str) -> bool:
+    ratio = difflib.SequenceMatcher(None, word, keyword).ratio()
+    return ratio >= dynamic_threshold(keyword)
+
+
+# ============================================================
+# CONTEXT CHECK
+# ============================================================
+
+def is_safe_context(text: str) -> bool:
+    lowered = text.lower()
+    for phrase in SAFE_CONTEXT:
+        if phrase in lowered:
             return True
+    return False
 
-        if re.search(r"\b\d+\s*(g|szt|tabs|ml)\s+\d{2,5}\b", normalized):
-            return True
 
-        if re.fullmatch(r"\d{2,5}", normalized):
-            return True
+def looks_like_listing(text: str) -> bool:
+    # Minimalny próg ogłoszeniowy
+    if len(text.split()) < 2:
+        return False
 
-        if re.search(r"\b\d{2,5}\s*(zł|pln|usd|eur|\$|€)\b", normalized):
-            return True
+    if re.search(r"\b(g|ml|tabs|szt)\b", text.lower()):
+        return True
 
-        if re.search(r"\b\d\s\d\s\d\b", normalized):
-            return True
+    if re.search(r"#(gdy|gda|sopt)", text.lower()):
+        return True
+
+    if len(text) > 15:
+        return True
 
     return False
 
-# ================= DB HELPERS =================
-def get_vendor(username):
-    cursor.execute("SELECT * FROM vendors WHERE username=?", (username,))
-    return cursor.fetchone()
 
-def add_vendor(username):
-    if get_vendor(username):
-        return False
-    now = datetime.now().strftime("%d.%m.%Y")
-    cursor.execute("INSERT INTO vendors VALUES(?,?,?,?,?)",
-                   (username, now, None, None, 0))
-    conn.commit()
-    return True
+# ============================================================
+# MAIN DETECTION FUNCTION
+# ============================================================
 
-def remove_vendor(username):
-    cursor.execute("DELETE FROM vendors WHERE username=?", (username,))
-    conn.commit()
+def ultra_detect(text: str, listing_mode: bool = True):
+    """
+    listing_mode=True → używane tylko w WTS/WTB/WTT
+    """
 
-def list_vendors():
-    cursor.execute("SELECT username, added_at, posts FROM vendors")
-    return cursor.fetchall()
+    if not listing_mode:
+        return "📦", text
 
-def update_vendor_settings(username, city, options):
-    cursor.execute(
-        "UPDATE vendors SET city=?, options=? WHERE username=?",
-        (city, ",".join(options), username)
-    )
-    conn.commit()
+    if is_safe_context(text):
+        return "📦", text
 
-def increment_posts(username):
-    cursor.execute(
-        "UPDATE vendors SET posts = posts + 1 WHERE username=?",
-        (username,)
-    )
-    conn.commit()
+    if not looks_like_listing(text):
+        return "📦", text
 
-def get_last_post(user_id):
-    cursor.execute("SELECT last_post FROM cooldowns WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
-    return row[0] if row else 0
+    normalized = normalize_ultra(text)
 
-def set_last_post(user_id):
-    cursor.execute("""
-        INSERT INTO cooldowns(user_id,last_post)
-        VALUES(?,?)
-        ON CONFLICT(user_id)
-        DO UPDATE SET last_post=excluded.last_post
-    """,(user_id,int(time.time())))
-    conn.commit()
+    tokens = re.findall(r"\b[a-z0-9]+\b", normalized)
+    original_tokens = re.findall(r"\b\S+\b", text)
 
-def clear_all_cooldowns():
-    cursor.execute("DELETE FROM cooldowns")
-    conn.commit()
+    detected_emoji = None
+    masked_words = []
+    matched_indexes = set()
 
-# ================= PREMIUM TEMPLATE =================
-def premium_template(title, username, content, vendor_data, city, options):
+    for idx, token in enumerate(tokens):
+        for emoji, keywords in ULTRA_CATEGORIES.items():
+            for key in keywords:
+                if fuzzy_match(token, key):
+                    detected_emoji = emoji
+                    matched_indexes.add(idx)
+                    break
 
-    badge = ""
-    if vendor_data:
-        badge = (
-            "<b>👑 VERIFIED VENDOR</b>\n"
-            f"<b>🗓 OD:</b> {vendor_data[1]}\n"
-            f"<b>📊 OGŁOSZEŃ:</b> {vendor_data[4]}\n\n"
-        )
+    # rebuild masked text
+    for idx, original in enumerate(original_tokens):
+        if idx in matched_indexes:
+            masked = "".join(
+                CHAR_MAP.get(c.lower(), c)
+                for c in original
+            )
+            masked_words.append(masked)
+        else:
+            masked_words.append(original)
 
-    option_text = ""
-    if options:
-        option_text = " | " + " | ".join(options)
+    if not detected_emoji:
+        detected_emoji = "📦"
 
-    profile = f"<b>👤 {username}</b>\n<b>📍 {city}{option_text} | #3CITY</b>"
+    return detected_emoji, " ".join(masked_words)
+    # ================= Część 4 z 6 =================
+# HARDCORE PRICE DETECTOR v3 (ANTI-BYPASS + LOW FALSE POSITIVE)
 
-    hashtag = ""
-    if title == "WTB":
-        hashtag = "\n<b>#WTB</b>"
-    if title == "WTT":
-        hashtag = "\n<b>#WTT</b>"
+import re
 
-    return (
-        f"<b>       💎 {title} MARKET 💎</b>\n\n"
-        f"{badge}"
-        f"{profile}\n\n"
+# ============================================================
+# CURRENCY PATTERNS
+# ============================================================
+
+CURRENCY_PATTERNS = [
+    r"\bzł\b",
+    r"\bpln\b",
+    r"\beur\b",
+    r"\busd\b",
+    r"€",
+    r"\$"
+]
+
+# ============================================================
+# WORD NUMBERS (PL + ENG BASIC)
+# ============================================================
+
+WORD_NUMBERS = [
+    "sto", "dwiescie", "trzysta", "czterysta",
+    "piecset", "szescset", "siedemset",
+    "osiemset", "dziewiecset",
+    "tysiac", "tysiace",
+    "hundred", "thousand"
+]
+
+# ============================================================
+# NORMALIZE (REUSE ULTRA PIPELINE)
+# ============================================================
+
+def normalize_price_text(text: str) -> str:
+    return normalize_ultra(text)
+
+
+# ============================================================
+# EXCEPTION PRODUCTS
+# ============================================================
+
+def remove_exceptions(text: str) -> str:
+    return re.sub(r"\b(3cmc|4mmc)\b", "", text)
+
+
+# ============================================================
+# PATTERN DETECTORS
+# ============================================================
+
+def contains_currency(text: str) -> bool:
+    for pattern in CURRENCY_PATTERNS:
+        if re.search(pattern, text):
+            return True
+    return False
+
+
+def contains_price_range(text: str) -> bool:
+    # 100-300
+    return bool(re.search(r"\b\d{2,}\s*[-]\s*\d{2,}\b", text))
+
+
+def contains_quantity_price(text: str) -> bool:
+    # 1g 200
+    return bool(re.search(r"\b\d+\s*(g|ml|tabs|szt)\s*\d{2,}\b", text))
+
+
+def contains_spaced_number(text: str) -> bool:
+    # 2 0 0
+    return bool(re.search(r"\b\d\s+\d\s+\d\b", text))
+
+
+def contains_broken_number(text: str) -> bool:
+    # 2-0-0 / 2.0.0 / 2_0_0
+    return bool(re.search(r"\b\d(?:[\-._/]\d){2,}\b", text))
+
+
+def contains_word_number(text: str) -> bool:
+    for word in WORD_NUMBERS:
+        if word in text:
+            return True
+    return False
+
+
+def contains_standalone_large_number(text: str) -> bool:
+    """
+    Blokujemy liczby >= 2 cyfry tylko jeśli:
+    - nie są rokiem (np. 2024)
+    - nie są procentem (99%)
+    - nie są jednostką (12g)
+    """
+    matches = re.findall(r"\b\d{2,}\b", text)
+
+    for m in matches:
+        number = int(m)
+
+        # dozwolone lata 1900–2099
+        if 1900 <= number <= 2099:
+            continue
+
+        # jeśli po liczbie jest % → OK
+        if re.search(rf"\b{m}%", text):
+            continue
+
+        # jeśli po liczbie jest jednostka → OK
+        if re.search(rf"\b{m}(g|ml|tabs|szt)\b", text):
+            continue
+
+        return True
+
+    return False
+
+
+# ============================================================
+# MAIN DETECTOR
+# ============================================================
+
+def hardcore_price_detect(text: str) -> bool:
+    """
+    True  → wykryto cenę (blokuj)
+    False → OK
+    """
+
+    normalized = normalize_price_text(text)
+    normalized = remove_exceptions(normalized)
+
+    if contains_currency(normalized):
+        return True
+
+    if contains_price_range(normalized):
+        return True
+
+    if contains_quantity_price(normalized):
+        return True
+
+    if contains_spaced_number(normalized):
+        return True
+
+    if contains_broken_number(normalized):
+        return True
+
+    if contains_word_number(normalized):
+        return True
+
+    if contains_standalone_large_number(normalized):
+        return True
+
+    return False
+    # ================= Część 5 z 6 =================
+# FLOW + LAYOUT + ATOMIC INTEREST SYSTEM (RACE SAFE)
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
+import html
+import time
+
+# ============================================================
+# CITY DETECTION
+# ============================================================
+
+CITY_KEYWORDS = {
+    "#GDY": ["gdy", "gdynia"],
+    "#GDA": ["gda", "gdansk"],
+    "#SOPT": ["sop", "sopot"]
+}
+
+
+def detect_city(text: str) -> str:
+    normalized = normalize_ultra(text)
+    for tag, keywords in CITY_KEYWORDS.items():
+        for k in keywords:
+            if k in normalized:
+                return tag
+    return "#3CITY"
+
+
+# ============================================================
+# SAFE CAPTION BUILDER
+# ============================================================
+
+def build_caption(role: str,
+                  title: str,
+                  username: str,
+                  content: str,
+                  city: str,
+                  interest_count: int) -> str:
+
+    safe_username = html.escape(username)
+    safe_content = content  # content already masked, do not escape emoji
+
+    header = f"{title} MARKET"
+
+    if role == "vip":
+        header = "✨💎 VIP MARKET 💎✨"
+    elif role == "vendor":
+        header = "💎 WTS MARKET 💎"
+
+    caption = (
+        f"<b>{header}</b>\n\n"
+        f"<b>👤 @{safe_username}</b>\n"
+        f"<b>📍 {city}</b>\n\n"
         "<code>───────────────</code>\n"
-        f"<b>{content}</b>\n"
-        "<code>───────────────</code>"
-        f"{hashtag}\n\n"
-        "<b>⚡ OFFICIAL MARKETPLACE</b>"
+        f"{safe_content}\n"
+        "<code>───────────────</code>\n\n"
+        f"<b>🔥 INTEREST: {interest_count}</b>"
     )
 
-# ================= AUTO SYSTEM =================
-async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
+    return caption
 
-    keyboard_wts = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📞 NAPISZ DO ADMINA", url="https://t.me/burwusovy")],
-        [InlineKeyboardButton("💼 DODAJ OGŁOSZENIE",
-                              url=f"https://t.me/{BOT_USERNAME}?start=1")]
-    ])
 
-    await context.bot.send_message(
-        chat_id=GROUP_ID,
-        message_thread_id=WTS_TOPIC,
-        text="<b>🔥 CHCESZ ZOSTAĆ VENDOREM?</b>\nVENDOR JEST DARMOWY (OKRES TESTOWY)",
-        parse_mode="HTML",
-        reply_markup=keyboard_wts
-    )
-# ================= START =================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private":
-        return
+# ============================================================
+# ATOMIC INTEREST SYSTEM
+# ============================================================
 
-    keyboard = [[
-        InlineKeyboardButton("🛒 WTB", callback_data="WTB"),
-        InlineKeyboardButton("💼 WTS", callback_data="WTS"),
-        InlineKeyboardButton("🔁 WTT", callback_data="WTT"),
-    ]]
+async def handle_interest(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if update.effective_user.id == ADMIN_ID:
-        keyboard.append([InlineKeyboardButton("⚙ ADMIN PANEL", callback_data="ADMIN")])
-
-    await update.message.reply_text(
-        "<b>WYBIERZ TYP OGŁOSZENIA:</b>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-# ================= ADMIN COMMANDS =================
-async def cmd_addvendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("<b>UŻYJ:</b> /addvendor @username", parse_mode="HTML")
-        return
-    username = context.args[0].replace("@", "").lower()
-    if add_vendor(username):
-        await update.message.reply_text("<b>VENDOR DODANY.</b>", parse_mode="HTML")
-    else:
-        await update.message.reply_text("<b>VENDOR JUŻ ISTNIEJE.</b>", parse_mode="HTML")
-
-async def cmd_removevendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("<b>UŻYJ:</b> /removevendor @username", parse_mode="HTML")
-        return
-    username = context.args[0].replace("@", "").lower()
-    remove_vendor(username)
-    await update.message.reply_text("<b>VENDOR USUNIĘTY.</b>", parse_mode="HTML")
-
-async def cmd_listvendors(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    vendors = list_vendors()
-    if not vendors:
-        await update.message.reply_text("<b>BRAK VENDORÓW.</b>", parse_mode="HTML")
-        return
-    text = ""
-    for v in vendors:
-        text += f"<b>@{v[0]}</b> | OD {v[1]} | OGŁOSZEŃ: {v[2]}\n"
-    await update.message.reply_text(text, parse_mode="HTML")
-
-# ================= ADMIN PANEL INLINE =================
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    keyboard = [
-        [InlineKeyboardButton("➕ DODAJ VENDORA", callback_data="ADD_VENDOR")],
-        [InlineKeyboardButton("➖ USUŃ VENDORA", callback_data="REMOVE_VENDOR")],
-        [InlineKeyboardButton("📋 LISTA VENDORÓW", callback_data="LIST_VENDOR")],
-        [InlineKeyboardButton("❌ USUŃ COOLDOWN", callback_data="CLEAR_CD")]
-    ]
-    await query.edit_message_text(
-        "<b>PANEL ADMINA</b>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+    user_id = query.from_user.id
+    message_id = query.message.message_id
+
+    if not check_rate_limit(user_id):
+        await query.answer("Zwolnij 😄", show_alert=False)
+        return
+
+    # Atomic insert
+    with db_cursor() as cur:
+        cur.execute("""
+            INSERT OR IGNORE INTO interests(message_id, user_id)
+            VALUES (?, ?)
+        """, (message_id, user_id))
+
+        cur.execute("""
+            SELECT COUNT(*) FROM interests WHERE message_id=?
+        """, (message_id,))
+        count = cur.fetchone()[0]
+
+    # Rebuild caption safely
+    original_caption = query.message.caption
+
+    # extract role/username/city/content from message
+    # rebuild minimalistically by replacing interest only
+    # safer: rebuild entirely using stored message fields
+
+    # fallback: replace only interest line safely
+    new_caption = re.sub(
+        r"🔥 INTEREST: \d+",
+        f"🔥 INTEREST: {count}",
+        original_caption
     )
 
-# ================= CALLBACK HANDLER =================
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user = query.from_user
-
-    # ADMIN PANEL
-    if query.data == "ADMIN" and user.id == ADMIN_ID:
-        await admin_panel(update, context)
-        return
-
-    if query.data == "CLEAR_CD" and user.id == ADMIN_ID:
-        clear_all_cooldowns()
-        await query.edit_message_text("<b>COOLDOWNY USUNIĘTE.</b>", parse_mode="HTML")
-        return
-
-    if query.data == "LIST_VENDOR" and user.id == ADMIN_ID:
-        vendors = list_vendors()
-        text = ""
-        for v in vendors:
-            text += f"<b>@{v[0]}</b> | OD {v[1]} | OGŁOSZEŃ: {v[2]}\n"
-        await query.edit_message_text(text or "<b>BRAK.</b>", parse_mode="HTML")
-        return
-
-    if query.data in ["ADD_VENDOR", "REMOVE_VENDOR"] and user.id == ADMIN_ID:
-        context.user_data["admin_action"] = query.data
-        await query.edit_message_text("<b>PODAJ @USERNAME:</b>", parse_mode="HTML")
-        return
-
-    # ================= WTS =================
-    if query.data == "WTS":
-        if not user.username:
-            await query.edit_message_text("<b>USTAW USERNAME.</b>", parse_mode="HTML")
-            return
-
-        vendor = get_vendor(user.username.lower())
-        if not vendor:
-            await query.edit_message_text("<b>TYLKO VENDOR.</b>", parse_mode="HTML")
-            return
-
-        if time.time() - get_last_post(user.id) < 6*60*60:
-            await query.edit_message_text("<b>COOLDOWN 6H.</b>", parse_mode="HTML")
-            return
-
-        context.user_data["vendor"] = vendor
-        await ask_product_count(query)
-        return
-
-    if query.data.startswith("CNT_"):
-        context.user_data["wts_total"] = int(query.data.split("_")[1])
-        context.user_data["wts_products"] = []
-        await query.edit_message_text("<b>PODAJ PRODUKT 1:</b>", parse_mode="HTML")
-        return
-
-    if query.data in ["CITY_GDY", "CITY_GDA", "CITY_SOP"]:
-        context.user_data["city"] = query.data
-        context.user_data["options"] = []
-        keyboard = [
-            [InlineKeyboardButton("✈️ DOLOT", callback_data="OPT_DOLOT")],
-            [InlineKeyboardButton("🚗 UBER PAKA", callback_data="OPT_UBER")],
-            [InlineKeyboardButton("❌ BRAK", callback_data="OPT_BRAK")],
-            [InlineKeyboardButton("✅ PUBLIKUJ", callback_data="OPT_DONE")]
-        ]
-        await query.edit_message_text(
-            "<b>WYBIERZ OPCJE:</b>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+    try:
+        await query.message.edit_caption(
+            caption=new_caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]
+            ])
         )
-        return
+    except Exception as e:
+        logger.warning("Interest caption update failed")
 
-    if query.data in ["OPT_DOLOT", "OPT_UBER"]:
-        if query.data not in context.user_data["options"]:
-            context.user_data["options"].append(query.data)
-        return
+    await query.answer("Zainteresowano!")
 
-    if query.data == "OPT_BRAK":
-        context.user_data["options"] = []
-        return
-
-    if query.data == "OPT_DONE":
-        await publish(update, context)
-        return
-
-    # ================= WTB / WTT =================
-    if query.data in ["WTB", "WTT"]:
-        context.user_data["type"] = query.data
-        await query.edit_message_text("<b>NAPISZ TREŚĆ:</b>", parse_mode="HTML")
-        return
+    # Optional: update vendor interest_total
+    # (requires storing vendor mapping message→username if needed)
 
 
-# ================= MESSAGE HANDLER =================
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private":
-        return
+# ============================================================
+# WTS FLOW
+# ============================================================
+
+async def handle_wts(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
+
+    if not check_rate_limit(user.id):
+        return
+
+    if not user.username:
+        await update.message.reply_text("Ustaw username.")
+        return
+
+    username = user.username.lower()
+
+    if not RoleManager.is_vendor(username):
+        await update.message.reply_text("Tylko vendor.")
+        return
+
+    role = "vip" if RoleManager.is_vip(username) else "vendor"
+
+    cooldown_limit = 3 * 60 * 60 if role == "vip" else 6 * 60 * 60
+    last = get_last_post(user.id)
+
+    if time.time() - last < cooldown_limit:
+        await update.message.reply_text("Cooldown aktywny.")
+        return
+
     text = update.message.text
 
-    # ADMIN ACTION
-    if user.id == ADMIN_ID and "admin_action" in context.user_data:
-        username = text.replace("@", "").lower()
-        if context.user_data["admin_action"] == "ADD_VENDOR":
-            add_vendor(username)
-            await update.message.reply_text("<b>DODANO.</b>", parse_mode="HTML")
-        else:
-            remove_vendor(username)
-            await update.message.reply_text("<b>USUNIĘTO.</b>", parse_mode="HTML")
-        context.user_data.clear()
+    # PRICE CHECK
+    if hardcore_price_detect(text):
+        await update.message.reply_text("❌ Zakaz cen.")
         return
 
-    # WTS PRODUCTS
-    if "wts_total" in context.user_data:
-        if contains_price_hardcore(text):
-            await update.message.reply_text("<b>❌ ZAKAZ PODAWANIA CEN.</b>", parse_mode="HTML")
-            return
+    # ULTRA DETECT
+    emoji, masked = ultra_detect(text, listing_mode=True)
 
-        context.user_data["wts_products"].append(text)
+    city = detect_city(text)
 
-        if len(context.user_data["wts_products"]) < context.user_data["wts_total"]:
-            await update.message.reply_text(
-                f"<b>PODAJ PRODUKT {len(context.user_data['wts_products'])+1}:</b>",
-                parse_mode="HTML"
-            )
-            return
-
-        keyboard = [
-            [InlineKeyboardButton("GDY", callback_data="CITY_GDY")],
-            [InlineKeyboardButton("GDA", callback_data="CITY_GDA")],
-            [InlineKeyboardButton("SOP", callback_data="CITY_SOP")]
-        ]
-
-        await update.message.reply_text(
-            "<b>WYBIERZ MIASTO:</b>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    # WTB / WTT TEXT
-    if "type" in context.user_data:
-        context.user_data["content"] = text
-
-        keyboard = [
-            [InlineKeyboardButton("GDY", callback_data="CITY_GDY")],
-            [InlineKeyboardButton("GDA", callback_data="CITY_GDA")],
-            [InlineKeyboardButton("SOP", callback_data="CITY_SOP")]
-        ]
-
-        await update.message.reply_text(
-            "<b>WYBIERZ MIASTO:</b>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-
-# ================= ASK PRODUCT COUNT =================
-async def ask_product_count(query):
-    keyboard = []
-    row = []
-    for i in range(1, 11):
-        row.append(InlineKeyboardButton(str(i), callback_data=f"CNT_{i}"))
-        if i % 5 == 0:
-            keyboard.append(row)
-            row = []
-    await query.edit_message_text(
-        "<b>ILE PRODUKTÓW?</b>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+    caption = build_caption(
+        role=role,
+        title="WTS",
+        username=username,
+        content=f"{emoji} {masked}",
+        city=city,
+        interest_count=0
     )
 
-# ================= PUBLISH =================
-async def publish(update, context):
-    user = update.callback_query.from_user
-    vendor = get_vendor(user.username.lower()) if user.username else None
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]
+    ])
 
-    city_map = {
-        "CITY_GDY": "#GDY",
-        "CITY_GDA": "#GDA",
-        "CITY_SOP": "#SOPT"
-    }
-
-    option_map = {
-        "OPT_DOLOT": "✈️ DOLOT",
-        "OPT_UBER": "🚗 UBER PAKA"
-    }
-
-    city = city_map.get(context.user_data.get("city"))
-    options = [
-        option_map[o] for o in context.user_data.get("options", [])
-        if o in option_map
-    ]
-
-    if "wts_products" in context.user_data:
-        content = "\n".join(
-            f"{get_product_emoji(p)} {smart_mask_caps(p)}"
-            for p in context.user_data["wts_products"]
-        )
-        title = "WTS"
-        topic = WTS_TOPIC
-
-        set_last_post(user.id)
-        increment_posts(user.username.lower())
-
-    else:
-        content = smart_mask_caps(context.user_data["content"])
-        title = context.user_data["type"]
-        topic = WTB_TOPIC if title == "WTB" else WTT_TOPIC
-
-    msg = await update.get_bot().send_photo(
+    msg = await context.bot.send_photo(
         chat_id=GROUP_ID,
-        message_thread_id=topic,
+        message_thread_id=WTS_TOPIC,
         photo=LOGO_URL,
-        caption=premium_template(
-            title,
-            f"@{user.username}".upper(),
-            content,
-            vendor,
-            city,
-            options
-        ),
-        parse_mode="HTML"
+        caption=caption,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard
     )
+
+    # VIP PIN
+    if role == "vip":
+        try:
+            await context.bot.pin_chat_message(GROUP_ID, msg.message_id)
+        except Exception:
+            logger.warning("Pin failed")
+
+    RoleManager.increment_posts(username)
+    RoleManager.update_last_content(username, text)
+    set_last_post(user.id)
+
+    log_action("publish_wts", username)
 
     # AUTO DELETE 48H
     async def delete_later(ctx):
         try:
             await ctx.bot.delete_message(GROUP_ID, msg.message_id)
-        except:
-            pass
+        except Exception:
+            logger.warning("Auto delete failed")
 
     context.application.job_queue.run_once(delete_later, 172800)
 
-    context.user_data.clear()
+    await update.message.reply_text("Opublikowano.")
 
-# ================= MAIN =================
+
+# ============================================================
+# WTB / WTT FLOW
+# ============================================================
+
+async def handle_wtb_wtt(update: Update,
+                         context: ContextTypes.DEFAULT_TYPE,
+                         type_: str):
+
+    user = update.effective_user
+
+    if not check_rate_limit(user.id):
+        return
+
+    text = html.escape(update.message.text)
+
+    emoji, masked = ultra_detect(text, listing_mode=True)
+    city = detect_city(text)
+
+    caption = build_caption(
+        role="user",
+        title=type_,
+        username=user.username or "USER",
+        content=f"{emoji} {masked}",
+        city=city,
+        interest_count=0
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]
+    ])
+
+    msg = await context.bot.send_photo(
+        chat_id=GROUP_ID,
+        message_thread_id=WTB_TOPIC if type_ == "WTB" else WTT_TOPIC,
+        photo=LOGO_URL,
+        caption=caption,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard
+    )
+
+    log_action(f"publish_{type_.lower()}", user.username or "USER")
+
+    async def delete_later(ctx):
+        try:
+            await ctx.bot.delete_message(GROUP_ID, msg.message_id)
+        except Exception:
+            logger.warning("Auto delete failed")
+
+    context.application.job_queue.run_once(delete_later, 172800)
+
+    await update.message.reply_text("Dodano ogłoszenie.")
+                             # ================= Część 6 z 6 =================
+# VIP ENTERPRISE SCHEDULER + VENDOR PANEL + ADMIN + MAIN
+
+from telegram.ext import (
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+import time
+
+# ============================================================
+# VIP SCHEDULER (PER USER, NO DUPLICATION)
+# ============================================================
+
+VIP_JOB_PREFIX = "vip_auto_"
+
+
+def vip_job_name(username: str) -> str:
+    return f"{VIP_JOB_PREFIX}{username}"
+
+
+def schedule_vip(application, username: str, interval: int = 21600):
+    """
+    interval domyślnie 6h
+    """
+
+    job_name = vip_job_name(username)
+
+    # sprawdź czy job istnieje
+    for job in application.job_queue.jobs():
+        if job.name == job_name:
+            return
+
+    async def vip_callback(ctx):
+        vendor = RoleManager.get_vendor(username)
+        if not vendor:
+            return
+
+        role = vendor[1]
+        auto_enabled = vendor[5]
+        last_content = vendor[4]
+
+        if role != "vip" or not auto_enabled or not last_content:
+            return
+
+        emoji, masked = ultra_detect(last_content, listing_mode=True)
+        city = detect_city(last_content)
+
+        caption = build_caption(
+            role="vip",
+            title="WTS",
+            username=username,
+            content=f"{emoji} {masked}",
+            city=city,
+            interest_count=0
+        )
+
+        msg = await ctx.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=WTS_TOPIC,
+            photo=LOGO_URL,
+            caption=caption,
+            parse_mode="HTML"
+        )
+
+        try:
+            await ctx.bot.pin_chat_message(GROUP_ID, msg.message_id)
+        except Exception:
+            logger.warning("VIP pin failed")
+
+        with db_cursor() as cur:
+            cur.execute("""
+                UPDATE vendors
+                SET last_auto_post=?
+                WHERE username=?
+            """, (int(time.time()), username))
+
+    application.job_queue.run_repeating(
+        vip_callback,
+        interval=interval,
+        first=interval,
+        name=job_name
+    )
+
+    logger.info(f"VIP scheduler started for {username}")
+
+
+def remove_vip_job(application, username: str):
+    job_name = vip_job_name(username)
+    for job in application.job_queue.jobs():
+        if job.name == job_name:
+            job.schedule_removal()
+            logger.info(f"VIP scheduler removed for {username}")
+
+
+def restore_vip_jobs(application):
+    with db_cursor() as cur:
+        cur.execute("""
+            SELECT username FROM vendors
+            WHERE role='vip' AND auto_enabled=1
+        """)
+        rows = cur.fetchall()
+
+    for (username,) in rows:
+        schedule_vip(application, username)
+
+
+# ============================================================
+# VENDOR PANEL
+# ============================================================
+
+async def cmd_panel(update, context):
+    user = update.effective_user
+
+    if not user.username:
+        return
+
+    username = user.username.lower()
+
+    if not RoleManager.is_vendor(username):
+        return
+
+    role = "vip" if RoleManager.is_vip(username) else "vendor"
+
+    buttons = [
+        [InlineKeyboardButton("🔁 REPOST", callback_data="REPOST")],
+        [InlineKeyboardButton("✏ EDIT", callback_data="EDIT")],
+        [InlineKeyboardButton("📊 STATS", callback_data="STATS")]
+    ]
+
+    if role == "vip":
+        buttons.append(
+            [InlineKeyboardButton("🤖 AUTO ON/OFF", callback_data="AUTO_TOGGLE")]
+        )
+
+    await update.message.reply_text(
+        "Panel Vendor:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+
+async def panel_callback(update, context):
+    query = update.callback_query
+    user = query.from_user
+
+    if not user.username:
+        return
+
+    username = user.username.lower()
+
+    if not RoleManager.is_vendor(username):
+        await query.answer("Brak dostępu.")
+        return
+
+    await query.answer()
+
+    if query.data == "REPOST":
+        last_content = RoleManager.get_last_content(username)
+        if not last_content:
+            await query.edit_message_text("Brak ostatniego ogłoszenia.")
+            return
+
+        await handle_wts(update, context)
+
+    elif query.data == "STATS":
+        vendor = RoleManager.get_vendor(username)
+        posts = vendor[3]
+        interest_total = vendor[7]
+
+        text = (
+            f"📊 Posty: {posts}\n"
+            f"🔥 Łączne interest: {interest_total}"
+        )
+
+        await query.edit_message_text(text)
+
+    elif query.data == "AUTO_TOGGLE":
+        if not RoleManager.is_vip(username):
+            return
+
+        vendor = RoleManager.get_vendor(username)
+        auto_enabled = vendor[5]
+
+        if auto_enabled:
+            with db_cursor() as cur:
+                cur.execute("""
+                    UPDATE vendors
+                    SET auto_enabled=0
+                    WHERE username=?
+                """, (username,))
+            remove_vip_job(context.application, username)
+            await query.edit_message_text("AUTO OFF")
+        else:
+            with db_cursor() as cur:
+                cur.execute("""
+                    UPDATE vendors
+                    SET auto_enabled=1
+                    WHERE username=?
+                """, (username,))
+            schedule_vip(context.application, username)
+            await query.edit_message_text("AUTO ON")
+
+
+# ============================================================
+# ADMIN COMMANDS
+# ============================================================
+
+async def cmd_addvendor(update, context):
+    if not RoleManager.is_admin(update.effective_user.id):
+        return
+
+    if not context.args:
+        return
+
+    username = context.args[0].replace("@", "").lower()
+    RoleManager.add_vendor(username)
+    await update.message.reply_text("Vendor dodany.")
+
+
+async def cmd_removevendor(update, context):
+    if not RoleManager.is_admin(update.effective_user.id):
+        return
+
+    if not context.args:
+        return
+
+    username = context.args[0].replace("@", "").lower()
+    RoleManager.remove_vendor(username)
+    await update.message.reply_text("Vendor usunięty.")
+
+
+async def cmd_makevip(update, context):
+    if not RoleManager.is_admin(update.effective_user.id):
+        return
+
+    if not context.args:
+        return
+
+    username = context.args[0].replace("@", "").lower()
+    RoleManager.set_vip(username)
+    await update.message.reply_text("Nadano VIP.")
+
+
+async def cmd_removevip(update, context):
+    if not RoleManager.is_admin(update.effective_user.id):
+        return
+
+    if not context.args:
+        return
+
+    username = context.args[0].replace("@", "").lower()
+    RoleManager.remove_vip(username)
+    await update.message.reply_text("VIP usunięty.")
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
-    app = Application.builder().token(TOKEN).build()
+    init_db()
+    bootstrap_roles()
 
-    app.add_handler(CommandHandler("start", start))
+    app = create_application()
+
+    # FLOW HANDLERS
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_wts))
+    app.add_handler(CallbackQueryHandler(handle_interest, pattern="INTEREST"))
+    app.add_handler(CallbackQueryHandler(panel_callback))
+
+    # PANEL
+    app.add_handler(CommandHandler("panel", cmd_panel))
+
+    # ADMIN
     app.add_handler(CommandHandler("addvendor", cmd_addvendor))
     app.add_handler(CommandHandler("removevendor", cmd_removevendor))
-    app.add_handler(CommandHandler("listvendors", cmd_listvendors))
+    app.add_handler(CommandHandler("makevip", cmd_makevip))
+    app.add_handler(CommandHandler("removevip", cmd_removevip))
 
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    restore_vip_jobs(app)
 
-    if app.job_queue:
-        app.job_queue.run_repeating(auto_messages, interval=43200, first=60)
-
+    logger.info("Bot started (Production Ready)")
     app.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
-
