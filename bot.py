@@ -840,7 +840,7 @@ def build_wtt_layout(city: str, content: str) -> str:
         f"<b>📍 {city} | #WTT</b>"
     )
 # ============================================================
-# FAZA 8/15 – MESSAGE ROUTER + FINAL PUBLISH
+# FAZA 8/15 – MESSAGE ROUTER (NO TYPE HINTS – SAFE)
 # ============================================================
 
 async def message_router(update, context):
@@ -852,9 +852,7 @@ async def message_router(update, context):
     text = update.message.text.strip()
     mode = get_mode(context)
 
-    # ========================================================
     # ========================= WTS ==========================
-    # ========================================================
 
     if mode == "WTS_INPUT":
 
@@ -896,9 +894,7 @@ async def message_router(update, context):
         return
 
 
-    # ========================================================
-    # ====================== WTB / WTT =======================
-    # ========================================================
+    # ======================= WTB / WTT ======================
 
     if mode in ["WTB", "WTT"]:
 
@@ -932,79 +928,6 @@ async def message_router(update, context):
 
         reset_state(context)
         return
-
-
-
-# ============================================================
-# PUBLISH – WTS
-# ============================================================
-
-async def publish_wts(update, context):
-
-    user = update.effective_user
-
-    if not user.username:
-        raise Exception("User has no username")
-
-    city = context.user_data.get("city")
-    products = context.user_data.get("wts_products", [])
-
-    if not products:
-        raise Exception("No products in WTS publish")
-
-    products_text = "\n".join(products)
-
-    caption = (
-        f"<b>💎 WTS MARKET</b>\n\n"
-        f"<b>@{user.username}</b>\n"
-        f"<b>📍 {city}</b>\n\n"
-        f"{products_text}"
-    )
-
-    await context.bot.send_photo(
-        chat_id=GROUP_ID,
-        message_thread_id=WTS_TOPIC,
-        photo=LOGO_URL,
-        caption=caption,
-        parse_mode="HTML"
-    )
-
-
-
-# ============================================================
-# PUBLISH – WTB / WTT
-# ============================================================
-
-async def publish_wtx(update, context):
-
-    user = update.effective_user
-
-    if not user.username:
-        raise Exception("User has no username")
-
-    city = context.user_data.get("city")
-    text = get_pending_text(context)
-    mode = get_mode(context)
-
-    if not text:
-        raise Exception("No text for WTB/WTT")
-
-    topic = WTB_TOPIC if mode == "WTB" else WTT_TOPIC
-
-    caption = (
-        f"<b>{mode} MARKET</b>\n\n"
-        f"<b>@{user.username}</b>\n"
-        f"<b>📍 {city}</b>\n\n"
-        f"{text}"
-    )
-
-    await context.bot.send_photo(
-        chat_id=GROUP_ID,
-        message_thread_id=topic,
-        photo=LOGO_URL,
-        caption=caption,
-        parse_mode="HTML"
-    )
         # ============================================================
 # FAZA 9/15 – UNIFIED MESSAGE ROUTER
 # ============================================================
@@ -1861,6 +1784,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
