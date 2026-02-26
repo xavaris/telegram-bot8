@@ -1816,13 +1816,36 @@ async def edit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Ogłoszenie zaktualizowane.",
         reply_markup=build_main_menu(user)
     )
-    # ============================================================
-# Część 15 z 15 – Application Wiring + Startup + Final Integrity Guard
 # ============================================================
+# Część 15 z 15 – Application Wiring + Startup (FIXED)
+# ============================================================
+
+# =========================
+# START COMMAND
+# =========================
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    reset_state(context)
+    init_state(context)
+
+    await update.message.reply_text(
+        "Menu:",
+        reply_markup=build_main_menu(update.effective_user)
+    )
+
+
+# =========================
+# GLOBAL ERROR HANDLER
+# =========================
 
 async def global_error_handler(update, context):
     logger.exception("Unhandled exception", exc_info=context.error)
 
+
+# =========================
+# SIGNAL HANDLERS (Railway Safe)
+# =========================
 
 def setup_signal_handlers(application: Application):
 
@@ -1837,22 +1860,28 @@ def setup_signal_handlers(application: Application):
     signal.signal(signal.SIGINT, shutdown_handler)
 
 
+# =========================
+# APPLICATION FACTORY
+# =========================
+
 def create_application() -> Application:
 
     app = Application.builder().token(TOKEN).build()
 
-    # Global error handler
     app.add_error_handler(global_error_handler)
 
-    # Signal handlers (Railway safe)
     setup_signal_handlers(app)
 
     return app
 
 
+# =========================
+# MAIN ENTRYPOINT
+# =========================
+
 def main():
 
-    # ================= INIT CORE =================
+    # ===== INIT CORE =====
     init_db()
     bootstrap_roles()
 
@@ -1865,7 +1894,7 @@ def main():
     app.add_handler(CallbackQueryHandler(city_callback, pattern="^CITY_"))
     app.add_handler(CallbackQueryHandler(panel_callback, pattern="^PANEL"))
     app.add_handler(CallbackQueryHandler(callback_router))
-    
+
     # ================= MESSAGE HANDLERS =================
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, edit_handler))
