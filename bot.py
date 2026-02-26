@@ -1,6 +1,5 @@
 # ============================================================
-# MARKET BOT 4.0 ENTERPRISE – PRODUCTION BUILD
-# CZĘŚĆ 1/10 – INFRASTRUCTURE CORE + ENV + DATABASE
+# CZĘŚĆ 1/12 – INFRASTRUCTURE CORE + ENV + DATABASE (WAL)
 # ============================================================
 
 import os
@@ -14,7 +13,7 @@ import sqlite3
 import unicodedata
 import difflib
 from contextlib import contextmanager
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -28,7 +27,7 @@ from telegram.ext import (
 )
 
 # ============================================================
-# LOGGING (Railway stdout only)
+# LOGGING (Railway stdout)
 # ============================================================
 
 logging.basicConfig(
@@ -76,7 +75,7 @@ BOOTSTRAP_VIP = [
 ]
 
 # ============================================================
-# DATABASE – Railway Persistent Volume + WAL
+# DATABASE – Persistent Volume + WAL
 # ============================================================
 
 DB_PATH = "/data/market.db"
@@ -150,9 +149,16 @@ def init_db():
         )
         """)
 
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS wtb_wtt_cooldown (
+            user_id INTEGER PRIMARY KEY,
+            last_post INTEGER
+        )
+        """)
+
     logger.info("Database initialized (WAL + Persistent Volume ready)")
     # ============================================================
-# CZĘŚĆ 2/10 – ULTRA DETECTION ENGINE + NORMALIZATION
+# CZĘŚĆ 2/12 – NORMALIZATION + ULTRA DETECTION ENGINE
 # ============================================================
 
 # ============================================================
@@ -320,7 +326,7 @@ def ultra_detect(text: str, listing_mode: bool = True) -> Tuple[str, str]:
 
     return detected_emoji, " ".join(masked_tokens)
     # ============================================================
-# CZĘŚĆ 3/10 – HARDCORE PRICE ENGINE + ROLE SYSTEM
+# CZĘŚĆ 3/12 – HARDCORE PRICE ENGINE + ROLE SYSTEM + COOLDOWN
 # ============================================================
 
 # ============================================================
@@ -409,7 +415,7 @@ class RoleManager:
         return bool(row and row[1] == "vip")
 
     @staticmethod
-    def add_vendor(username: str, role="vendor"):
+    def add_vendor(username: str, role: str = "vendor"):
         with db_cursor() as cur:
             cur.execute("""
                 INSERT OR IGNORE INTO vendors(username, role, added_at)
@@ -435,7 +441,7 @@ def bootstrap_roles():
 
 
 # ============================================================
-# COOLDOWN SYSTEM
+# WTS COOLDOWN SYSTEM
 # ============================================================
 
 def get_last_post(user_id: int) -> int:
@@ -453,12 +459,32 @@ def set_last_post(user_id: int):
             ON CONFLICT(user_id)
             DO UPDATE SET last_post=excluded.last_post
         """, (user_id, int(time.time())))
-        # ============================================================
-# CZĘŚĆ 4/10 – STATE MANAGEMENT + MENU + START
-# ============================================================
+
 
 # ============================================================
-# STATE CONTROL
+# WTB/WTT COOLDOWN SYSTEM
+# ============================================================
+
+WTB_WTT_COOLDOWN = 1800
+
+
+def get_wtb_wtt_last(user_id: int) -> int:
+    with db_cursor() as cur:
+        cur.execute("SELECT last_post FROM wtb_wtt_cooldown WHERE user_id=?", (user_id,))
+        row = cur.fetchone()
+        return row[0] if row else 0
+
+
+def set_wtb_wtt_last(user_id: int):
+    with db_cursor() as cur:
+        cur.execute("""
+            INSERT INTO wtb_wtt_cooldown(user_id,last_post)
+            VALUES (?,?)
+            ON CONFLICT(user_id)
+            DO UPDATE SET last_post=excluded.last_post
+        """, (user_id, int(time.time())))
+        # ============================================================
+# CZĘŚĆ 4/12 – STATE MANAGEMENT + MENU + START + CITY DETECT
 # ============================================================
 
 def reset_state(context: ContextTypes.DEFAULT_TYPE):
@@ -472,16 +498,12 @@ def init_state(context: ContextTypes.DEFAULT_TYPE):
             "wts_total": 0,
             "wts_products": [],
             "city": None,
-            "options": [],
+            "temp_listing": None,
             "admin_action": None,
             "edit_mode": False,
             "initialized": True
         })
 
-
-# ============================================================
-# MENU BUILDER
-# ============================================================
 
 def build_main_menu(user):
     keyboard = []
@@ -509,10 +531,6 @@ def back_button():
     )
 
 
-# ============================================================
-# START COMMAND
-# ============================================================
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_state(context)
     init_state(context)
@@ -523,26 +541,24 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ============================================================
-# CITY DETECTION
-# ============================================================
-
 CITY_KEYWORDS = {
-    "GDY": ["gdynia", "gdy"],
-    "GDA": ["gdansk", "gdańsk", "gda"],
-    "SOP": ["sopot", "sop"],
+    "GDY": ["gdynia", "gdy", "#gdy"],
+    "GDA": ["gdansk", "gdańsk", "gda", "#gda"],
+    "SOP": ["sopot", "sop", "#sop"],
 }
 
 
-def detect_city(text: str) -> str:
+def detect_city(text: str) -> Optional[str]:
     normalized = normalize_for_detection(text)
+
     for city, keywords in CITY_KEYWORDS.items():
-        for k in keywords:
-            if k in normalized:
+        for keyword in keywords:
+            if keyword in normalized:
                 return city
-    return "3CITY"
+
+    return None
     # ============================================================
-# CZĘŚĆ 5/10 – CALLBACK ROUTER (WTS / WTB / WTT)
+# CZĘŚĆ 5/12 – CALLBACK ROUTER (WTS / WTB / WTT ENTRY FLOW)
 # ============================================================
 
 async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -563,39 +579,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ================= PANEL OPEN =================
+    # ================= PANEL =================
     if query.data == "PANEL":
+        await panel_callback(update, context)
+        return
 
-        if not user.username:
-            await query.edit_message_text("Brak username.")
-            return
-
-        username = user.username.lower()
-
-        if not RoleManager.is_vendor(username):
-            await query.edit_message_text("Brak dostępu.")
-            return
-
-        vendor = RoleManager.get_vendor(username)
-        role = vendor[1]
-        auto_enabled = vendor[5]
-
-        keyboard = [
-            [InlineKeyboardButton("🔁 REPOST", callback_data="PANEL_REPOST")],
-            [InlineKeyboardButton("✏ EDYTUJ", callback_data="PANEL_EDIT")],
-            [InlineKeyboardButton("📊 STATYSTYKI", callback_data="PANEL_STATS")],
-        ]
-
-        if role == "vip":
-            label = "🤖 AUTO OFF" if auto_enabled else "🤖 AUTO ON"
-            keyboard.append([InlineKeyboardButton(label, callback_data="PANEL_AUTO")])
-
-        keyboard.append([InlineKeyboardButton("⬅ MENU", callback_data="MENU")])
-
-        await query.edit_message_text(
-            "Panel vendora:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+    # ================= ADMIN PANEL =================
+    if query.data == "ADMIN":
+        await admin_panel(update, context)
         return
 
     # ================= WTS START =================
@@ -619,6 +610,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = []
         row = []
+
         for i in range(1, 11):
             row.append(
                 InlineKeyboardButton(str(i), callback_data=f"WTS_COUNT_{i}")
@@ -626,6 +618,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if i % 5 == 0:
                 keyboard.append(row)
                 row = []
+
         keyboard.append([InlineKeyboardButton("⬅ MENU", callback_data="MENU")])
 
         await query.edit_message_text(
@@ -637,7 +630,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ================= WTS COUNT =================
     if query.data.startswith("WTS_COUNT_"):
 
-        count = int(query.data.split("_")[2])
+        try:
+            count = int(query.data.split("_")[2])
+        except Exception:
+            await query.edit_message_text("Błąd wyboru.")
+            return
+
+        if count < 1 or count > 10:
+            await query.edit_message_text("Niepoprawna liczba.")
+            return
+
         context.user_data["mode"] = "WTS_INPUT"
         context.user_data["wts_total"] = count
         context.user_data["wts_products"] = []
@@ -648,30 +650,49 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ================= WTB / WTT =================
+    # ================= WTB / WTT START =================
     if query.data in ("WTB", "WTT"):
+
         context.user_data["mode"] = query.data
+
         await query.edit_message_text(
             f"Wpisz treść ogłoszenia {query.data}:",
             reply_markup=back_button(),
         )
         return
-        # ============================================================
-# CZĘŚĆ 6/10 – MESSAGE ROUTER + FINALIZE WTS
+
+    # ================= CITY SELECT (WTS + WTB/WTT) =================
+    if query.data.startswith("CITY_"):
+
+        city = query.data.replace("CITY_", "")
+        context.user_data["city"] = city
+
+        if context.user_data.get("mode") == "WTS_INPUT":
+            await finalize_wts(update, context)
+            return
+
+        if context.user_data.get("mode") in ("WTB", "WTT"):
+            await publish_wtb_wtt(update, context)
+            return
+            # ============================================================
+# CZĘŚĆ 6/12 – MESSAGE ROUTER (WTS FLOW + WTB/WTT FLOW)
 # ============================================================
 
 async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     init_state(context)
+
     user = update.effective_user
     text = update.message.text
 
     # ================= ADMIN FLOW =================
     if context.user_data.get("admin_action"):
+        await admin_text_handler(update, context)
         return
 
-    # ================= EDIT MODE =================
+    # ================= EDIT FLOW =================
     if context.user_data.get("edit_mode"):
+        await edit_handler(update, context)
         return
 
     # ================= WTS INPUT =================
@@ -697,7 +718,11 @@ async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         combined = " ".join(context.user_data["wts_products"])
         detected_city = detect_city(combined)
-        context.user_data["city"] = detected_city
+
+        if detected_city:
+            context.user_data["city"] = detected_city
+            await finalize_wts(update, context)
+            return
 
         keyboard = [
             [
@@ -709,7 +734,7 @@ async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await update.message.reply_text(
-            f"Wykryto miasto: {detected_city}\nWybierz miasto:",
+            "Wybierz miasto:",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return
@@ -723,100 +748,111 @@ async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Zakaz cen.")
             return
 
+        last = get_wtb_wtt_last(user.id)
+        remaining = WTB_WTT_COOLDOWN - (int(time.time()) - last)
+
+        if remaining > 0:
+            await update.message.reply_text(
+                f"⏳ Poczekaj {remaining} sekund przed kolejnym ogłoszeniem."
+            )
+            return
+
         emoji, masked = ultra_detect(text, listing_mode=True)
-        city = detect_city(text)
+        detected_city = detect_city(text)
 
-        caption = (
-            f"<b>{mode} MARKET</b>\n\n"
-            f"{emoji} {masked}\n\n"
-            f"<b>📍 {city} | #3CITY</b>\n\n"
-            f"<b>🔥 INTEREST: 0</b>"
-        )
+        context.user_data["temp_listing"] = {
+            "mode": mode,
+            "emoji": emoji,
+            "masked": masked,
+        }
 
-        msg = await update.message.bot.send_photo(
-            chat_id=GROUP_ID,
-            message_thread_id=WTB_TOPIC if mode == "WTB" else WTT_TOPIC,
-            photo=LOGO_URL,
-            caption=caption,
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]]
-            ),
-        )
+        if detected_city:
+            context.user_data["city"] = detected_city
+            await publish_wtb_wtt(update, context)
+            return
 
-        with db_cursor() as cur:
-            cur.execute("""
-                UPDATE vendors
-                SET posts = posts + 1,
-                    last_content = ?
-                WHERE username=?
-            """, (caption, user.username.lower() if user.username else ""))
-
-        set_last_post(user.id)
-
-        reset_state(context)
+        keyboard = [
+            [
+                InlineKeyboardButton("GDY", callback_data="CITY_GDY"),
+                InlineKeyboardButton("GDA", callback_data="CITY_GDA"),
+                InlineKeyboardButton("SOP", callback_data="CITY_SOP"),
+            ],
+            [InlineKeyboardButton("⬅ MENU", callback_data="MENU")],
+        ]
 
         await update.message.reply_text(
-            "Opublikowano.",
-            reply_markup=build_main_menu(user),
+            "Wybierz miasto:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
         )
+        return
+        # ============================================================
+# CZĘŚĆ 7/12 – FINALIZE WTS + PUBLISH WTB/WTT
+# ============================================================
+
+def safe_caption(text: str) -> str:
+    return text[:1000]
 
 
 async def finalize_wts(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    query = update.callback_query
-    user = query.from_user
+    user = update.effective_user
 
     if not user.username:
-        await query.edit_message_text("Brak username.")
         return
 
     username = user.username.lower()
     vendor = RoleManager.get_vendor(username)
 
     if not vendor:
-        await query.edit_message_text("Brak dostępu.")
         return
 
     role = vendor[1]
+    city = context.user_data.get("city") or "3CITY"
+    content = "\n".join(context.user_data.get("wts_products", []))
 
-    city = context.user_data.get("city", "3CITY")
-    options = context.user_data.get("options", [])
-    content = "\n".join(context.user_data["wts_products"])
-
-    badge = ""
     if role == "vip":
-        badge = "<b>👑 VIP VENDOR</b>\n"
+        caption = (
+            "╔════════════════════╗\n"
+            "║   👑 VIP EXCLUSIVE  ║\n"
+            "╚════════════════════╝\n\n"
+            f"<b>@{html.escape(username)}</b>\n"
+            f"<b>📍 {city}</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"{content}\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "<b>🔥 INTEREST: 0</b>"
+        )
+    else:
+        caption = (
+            "<b>💎 MARKET LISTING</b>\n\n"
+            f"<b>@{html.escape(username)}</b>\n"
+            f"<b>📍 {city}</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"{content}\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "<b>🔥 INTEREST: 0</b>"
+        )
 
-    option_text = ""
-    if options:
-        option_text = "\n" + " | ".join(options)
-
-    caption = (
-        f"<b>💎 WTS MARKET 💎</b>\n\n"
-        f"{badge}"
-        f"<b>@{html.escape(username)}</b>\n"
-        f"<b>📍 {city}</b>{option_text}\n\n"
-        f"{content}\n\n"
-        f"<b>🔥 INTEREST: 0</b>"
-    )
-
-    msg = await query.bot.send_photo(
-        chat_id=GROUP_ID,
-        message_thread_id=WTS_TOPIC,
-        photo=LOGO_URL,
-        caption=caption,
-        parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]]
-        ),
-    )
+    try:
+        msg = await context.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=WTS_TOPIC,
+            photo=LOGO_URL,
+            caption=safe_caption(caption),
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]]
+            ),
+        )
+    except Exception:
+        logger.exception("WTS publish failed")
+        return
 
     if role == "vip":
         try:
-            await query.bot.pin_chat_message(GROUP_ID, msg.message_id)
+            await context.bot.pin_chat_message(GROUP_ID, msg.message_id)
         except Exception:
-            pass
+            logger.exception("VIP pin failed")
 
     with db_cursor() as cur:
         cur.execute("""
@@ -827,19 +863,220 @@ async def finalize_wts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """, (caption, username))
 
     set_last_post(user.id)
+    schedule_auto_delete(context, msg.message_id)
     reset_state(context)
 
-    await query.edit_message_text(
-        "Opublikowano.",
-        reply_markup=build_main_menu(user),
+    try:
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="Opublikowano.",
+            reply_markup=build_main_menu(user),
+        )
+    except Exception:
+        pass
+
+
+async def publish_wtb_wtt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user
+    data = context.user_data.get("temp_listing")
+
+    if not data:
+        return
+
+    mode = data["mode"]
+    emoji = data["emoji"]
+    masked = data["masked"]
+    city = context.user_data.get("city") or "3CITY"
+
+    if mode == "WTB":
+        title = "🛒 MARKET BUY REQUEST"
+        topic = WTB_TOPIC
+    else:
+        title = "🔁 MARKET TRADE OFFER"
+        topic = WTT_TOPIC
+
+    caption = (
+        f"<b>{title}</b>\n\n"
+        f"<b>📍 {city}</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"{emoji} {masked}\n"
+        "━━━━━━━━━━━━━━━━━━"
     )
-    # ============================================================
-# CZĘŚĆ 7/10 – INTEREST SYSTEM + AUTO DELETE + VIP AUTO
+
+    try:
+        msg = await context.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=topic,
+            photo=LOGO_URL,
+            caption=safe_caption(caption),
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        logger.exception("WTB/WTT publish failed")
+        return
+
+    set_wtb_wtt_last(user.id)
+    schedule_auto_delete(context, msg.message_id)
+    reset_state(context)
+
+    try:
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="Opublikowano.",
+            reply_markup=build_main_menu(user),
+        )
+    except Exception:
+        pass
+        # ============================================================
+# CZĘŚĆ 7/12 – FINALIZE WTS + PUBLISH WTB/WTT
 # ============================================================
 
+def safe_caption(text: str) -> str:
+    return text[:1000]
+
+
+async def finalize_wts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user
+
+    if not user.username:
+        return
+
+    username = user.username.lower()
+    vendor = RoleManager.get_vendor(username)
+
+    if not vendor:
+        return
+
+    role = vendor[1]
+    city = context.user_data.get("city") or "3CITY"
+    content = "\n".join(context.user_data.get("wts_products", []))
+
+    if role == "vip":
+        caption = (
+            "╔════════════════════╗\n"
+            "║   👑 VIP EXCLUSIVE  ║\n"
+            "╚════════════════════╝\n\n"
+            f"<b>@{html.escape(username)}</b>\n"
+            f"<b>📍 {city}</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"{content}\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "<b>🔥 INTEREST: 0</b>"
+        )
+    else:
+        caption = (
+            "<b>💎 MARKET LISTING</b>\n\n"
+            f"<b>@{html.escape(username)}</b>\n"
+            f"<b>📍 {city}</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"{content}\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "<b>🔥 INTEREST: 0</b>"
+        )
+
+    try:
+        msg = await context.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=WTS_TOPIC,
+            photo=LOGO_URL,
+            caption=safe_caption(caption),
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]]
+            ),
+        )
+    except Exception:
+        logger.exception("WTS publish failed")
+        return
+
+    if role == "vip":
+        try:
+            await context.bot.pin_chat_message(GROUP_ID, msg.message_id)
+        except Exception:
+            logger.exception("VIP pin failed")
+
+    with db_cursor() as cur:
+        cur.execute("""
+            UPDATE vendors
+            SET posts = posts + 1,
+                last_content = ?
+            WHERE username=?
+        """, (caption, username))
+
+    set_last_post(user.id)
+    schedule_auto_delete(context, msg.message_id)
+    reset_state(context)
+
+    try:
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="Opublikowano.",
+            reply_markup=build_main_menu(user),
+        )
+    except Exception:
+        pass
+
+
+async def publish_wtb_wtt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user
+    data = context.user_data.get("temp_listing")
+
+    if not data:
+        return
+
+    mode = data["mode"]
+    emoji = data["emoji"]
+    masked = data["masked"]
+    city = context.user_data.get("city") or "3CITY"
+
+    if mode == "WTB":
+        title = "🛒 MARKET BUY REQUEST"
+        topic = WTB_TOPIC
+    else:
+        title = "🔁 MARKET TRADE OFFER"
+        topic = WTT_TOPIC
+
+    caption = (
+        f"<b>{title}</b>\n\n"
+        f"<b>📍 {city}</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"{emoji} {masked}\n"
+        "━━━━━━━━━━━━━━━━━━"
+    )
+
+    try:
+        msg = await context.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=topic,
+            photo=LOGO_URL,
+            caption=safe_caption(caption),
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        logger.exception("WTB/WTT publish failed")
+        return
+
+    set_wtb_wtt_last(user.id)
+    schedule_auto_delete(context, msg.message_id)
+    reset_state(context)
+
+    try:
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="Opublikowano.",
+            reply_markup=build_main_menu(user),
+        )
+    except Exception:
+        pass
+        # ============================================================
+# CZĘŚĆ 8/12 – INTEREST SYSTEM (WTS ONLY) + AUTO DELETE
 # ============================================================
-# AUTO DELETE (48H)
-# ============================================================
+
+INTEREST_RATE_LIMIT: Dict[int, float] = {}
+
 
 def schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, message_id: int):
 
@@ -847,17 +1084,13 @@ def schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, message_id: int):
         try:
             await ctx.bot.delete_message(GROUP_ID, message_id)
         except Exception:
-            pass
+            logger.exception("Auto delete failed")
 
     context.application.job_queue.run_once(
         delete_job,
         when=172800
     )
 
-
-# ============================================================
-# INTEREST SYSTEM (ATOMIC + POPRAWNY VENDOR)
-# ============================================================
 
 async def handle_interest(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -869,13 +1102,20 @@ async def handle_interest(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     caption = message.caption or ""
 
-    vendor_username = None
+    # Interest obsługiwany tylko dla WTS (musi zawierać @username)
     match = re.search(r"<b>@([a-zA-Z0-9_]+)</b>", caption)
-    if match:
-        vendor_username = match.group(1).lower()
-
-    if not vendor_username:
+    if not match:
         return
+
+    vendor_username = match.group(1).lower()
+
+    now = time.time()
+    last_click = INTEREST_RATE_LIMIT.get(user.id, 0)
+
+    if now - last_click < 3:
+        return
+
+    INTEREST_RATE_LIMIT[user.id] = now
 
     try:
         with db_cursor() as cur:
@@ -885,17 +1125,20 @@ async def handle_interest(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 VALUES (?, ?, ?)
             """, (message.message_id, user.id, vendor_username))
 
+            inserted = cur.rowcount
+
             cur.execute("""
                 SELECT COUNT(*) FROM interests
                 WHERE message_id=?
             """, (message.message_id,))
             count = cur.fetchone()[0]
 
-            cur.execute("""
-                UPDATE vendors
-                SET interest_total = interest_total + 1
-                WHERE username=?
-            """, (vendor_username,))
+            if inserted:
+                cur.execute("""
+                    UPDATE vendors
+                    SET interest_total = interest_total + 1
+                    WHERE username=?
+                """, (vendor_username,))
 
         new_caption = re.sub(
             r"🔥 INTEREST:\s*\d+",
@@ -906,98 +1149,12 @@ async def handle_interest(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.edit_caption(
             caption=new_caption,
             parse_mode=ParseMode.HTML,
-            reply_markup=message.reply_markup
         )
 
     except Exception:
         logger.exception("Interest handling error")
-
-
-# ============================================================
-# VIP AUTO SYSTEM
-# ============================================================
-
-VIP_JOB_PREFIX = "vip_auto_"
-
-
-def vip_job_name(username: str) -> str:
-    return f"{VIP_JOB_PREFIX}{username}"
-
-
-def remove_vip_job(application: Application, username: str):
-    name = vip_job_name(username)
-    for job in application.job_queue.jobs():
-        if job.name == name:
-            job.schedule_removal()
-
-
-def schedule_vip_job(application: Application, username: str, interval: int = 21600):
-
-    name = vip_job_name(username)
-
-    for job in application.job_queue.jobs():
-        if job.name == name:
-            return
-
-    async def vip_callback(ctx: ContextTypes.DEFAULT_TYPE):
-
-        vendor = RoleManager.get_vendor(username)
-        if not vendor:
-            return
-
-        role = vendor[1]
-        auto_enabled = vendor[5]
-        last_content = vendor[4]
-
-        if role != "vip" or not auto_enabled or not last_content:
-            return
-
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]]
-        )
-
-        msg = await ctx.bot.send_photo(
-            chat_id=GROUP_ID,
-            message_thread_id=WTS_TOPIC,
-            photo=LOGO_URL,
-            caption=last_content.replace("🔥 INTEREST:", "🔥 INTEREST: 0"),
-            parse_mode=ParseMode.HTML,
-            reply_markup=keyboard
-        )
-
-        try:
-            await ctx.bot.pin_chat_message(GROUP_ID, msg.message_id)
-        except Exception:
-            pass
-
-        with db_cursor() as cur:
-            cur.execute("""
-                UPDATE vendors
-                SET last_auto_post=?
-                WHERE username=?
-            """, (int(time.time()), username))
-
-    application.job_queue.run_repeating(
-        vip_callback,
-        interval=interval,
-        first=interval,
-        name=name
-    )
-
-
-def restore_vip_jobs(application: Application):
-
-    with db_cursor() as cur:
-        cur.execute("""
-            SELECT username FROM vendors
-            WHERE role='vip' AND auto_enabled=1
-        """)
-        rows = cur.fetchall()
-
-    for (username,) in rows:
-        schedule_vip_job(application, username)
         # ============================================================
-# CZĘŚĆ 8/10 – PANEL CALLBACK + EDIT HANDLER
+# CZĘŚĆ 10/12 – PANEL CALLBACK + EDIT HANDLER
 # ============================================================
 
 async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1019,6 +1176,7 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     vendor = RoleManager.get_vendor(username)
     role = vendor[1]
     last_content = vendor[4]
+    auto_enabled = vendor[5]
 
     # ================= REPOST =================
     if query.data == "PANEL_REPOST":
@@ -1033,27 +1191,28 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Cooldown aktywny.")
             return
 
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]]
-        )
+        try:
+            msg = await context.bot.send_photo(
+                chat_id=GROUP_ID,
+                message_thread_id=WTS_TOPIC,
+                photo=LOGO_URL,
+                caption=safe_caption(last_content.replace("🔥 INTEREST:", "🔥 INTEREST: 0")),
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]]
+                ),
+            )
 
-        msg = await query.bot.send_photo(
-            chat_id=GROUP_ID,
-            message_thread_id=WTS_TOPIC,
-            photo=LOGO_URL,
-            caption=last_content.replace("🔥 INTEREST:", "🔥 INTEREST: 0"),
-            parse_mode=ParseMode.HTML,
-            reply_markup=keyboard,
-        )
+            if role == "vip":
+                await context.bot.pin_chat_message(GROUP_ID, msg.message_id)
 
-        if role == "vip":
-            try:
-                await query.bot.pin_chat_message(GROUP_ID, msg.message_id)
-            except Exception:
-                pass
+            set_last_post(user.id)
+            schedule_auto_delete(context, msg.message_id)
 
-        set_last_post(user.id)
-        schedule_auto_delete(context, msg.message_id)
+        except Exception:
+            logger.exception("Repost failed")
+            await query.edit_message_text("Błąd repostu.")
+            return
 
         await query.edit_message_text(
             "Repost wykonany.",
@@ -1085,21 +1244,26 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ================= VIP AUTO =================
     if query.data == "PANEL_AUTO" and role == "vip":
 
-        auto_enabled = vendor[5]
-
-        with db_cursor() as cur:
-            if auto_enabled:
-                cur.execute("""
-                    UPDATE vendors SET auto_enabled=0 WHERE username=?
-                """, (username,))
-                remove_vip_job(context.application, username)
-                status = "AUTO OFF"
-            else:
-                cur.execute("""
-                    UPDATE vendors SET auto_enabled=1 WHERE username=?
-                """, (username,))
-                schedule_vip_job(context.application, username)
-                status = "AUTO ON"
+        try:
+            with db_cursor() as cur:
+                if auto_enabled:
+                    cur.execute("""
+                        UPDATE vendors SET auto_enabled=0
+                        WHERE username=?
+                    """, (username,))
+                    remove_vip_job(context.application, username)
+                    status = "AUTO OFF"
+                else:
+                    cur.execute("""
+                        UPDATE vendors SET auto_enabled=1
+                        WHERE username=?
+                    """, (username,))
+                    schedule_vip_job(context.application, username)
+                    status = "AUTO ON"
+        except Exception:
+            logger.exception("VIP toggle failed")
+            await query.edit_message_text("Błąd AUTO.")
+            return
 
         await query.edit_message_text(
             status,
@@ -1129,22 +1293,30 @@ async def edit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     emoji, masked = ultra_detect(text, listing_mode=True)
     city = detect_city(text)
 
-    caption = (
-        f"<b>💎 WTS MARKET 💎</b>\n\n"
+    new_caption = (
+        "<b>💎 MARKET LISTING</b>\n\n"
         f"<b>@{username}</b>\n"
         f"<b>📍 {city}</b>\n\n"
-        f"{emoji} {masked}\n\n"
-        f"<b>🔥 INTEREST: 0</b>"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"{emoji} {masked}\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>🔥 INTEREST: 0</b>"
     )
 
-    with db_cursor() as cur:
-        cur.execute("""
-            UPDATE vendors
-            SET last_content=?, auto_enabled=0
-            WHERE username=?
-        """, (caption, username))
+    try:
+        with db_cursor() as cur:
+            cur.execute("""
+                UPDATE vendors
+                SET last_content=?, auto_enabled=0
+                WHERE username=?
+            """, (new_caption, username))
 
-    remove_vip_job(context.application, username)
+        remove_vip_job(context.application, username)
+
+    except Exception:
+        logger.exception("Edit update failed")
+        await update.message.reply_text("Błąd edycji.")
+        return
 
     context.user_data["edit_mode"] = False
 
@@ -1153,8 +1325,89 @@ async def edit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=build_main_menu(user),
     )
     # ============================================================
-# CZĘŚĆ 9/10 – ADMIN PANEL + ADMIN FLOW
+# CZĘŚĆ 11/12 – ADMIN PANEL + ADMIN FLOW + COMMANDS
 # ============================================================
+
+# ================= ADMIN COMMANDS =================
+
+async def cmd_addvendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not RoleManager.is_admin(user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Użycie: /addvendor @username")
+        return
+
+    username = context.args[0].replace("@", "").lower()
+    RoleManager.add_vendor(username, "vendor")
+
+    await update.message.reply_text(f"Dodano vendora: @{username}")
+
+
+async def cmd_removevendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not RoleManager.is_admin(user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Użycie: /removevendor @username")
+        return
+
+    username = context.args[0].replace("@", "").lower()
+    RoleManager.remove_vendor(username)
+
+    await update.message.reply_text(f"Usunięto vendora: @{username}")
+
+
+async def cmd_makevip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not RoleManager.is_admin(user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Użycie: /makevip @username")
+        return
+
+    username = context.args[0].replace("@", "").lower()
+    RoleManager.set_vip(username)
+
+    await update.message.reply_text(f"Nadano VIP: @{username}")
+
+
+async def cmd_removevip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not RoleManager.is_admin(user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Użycie: /removevip @username")
+        return
+
+    username = context.args[0].replace("@", "").lower()
+
+    with db_cursor() as cur:
+        cur.execute("""
+            UPDATE vendors
+            SET role='vendor', auto_enabled=0
+            WHERE username=?
+        """, (username,))
+
+    await update.message.reply_text(f"Odebrano VIP: @{username}")
+
+
+async def cmd_resetcooldown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not RoleManager.is_admin(user.id):
+        return
+
+    with db_cursor() as cur:
+        cur.execute("DELETE FROM cooldowns")
+
+    await update.message.reply_text("Cooldown zresetowany.")
+
+
+# ================= ADMIN PANEL (INLINE) =================
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -1171,8 +1424,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("➖ REMOVE VENDOR", callback_data="ADMIN_REMOVE")],
         [InlineKeyboardButton("👑 MAKE VIP", callback_data="ADMIN_MAKEVIP")],
         [InlineKeyboardButton("❌ REMOVE VIP", callback_data="ADMIN_REMVIP")],
-        [InlineKeyboardButton("🔄 REMOVE COOLDOWN", callback_data="ADMIN_RMCD")],
-        [InlineKeyboardButton("📦 BACKUP", callback_data="ADMIN_BACKUP")],
+        [InlineKeyboardButton("🔄 RESET COOLDOWN", callback_data="ADMIN_RMCD")],
         [InlineKeyboardButton("⬅ MENU", callback_data="MENU")],
     ]
 
@@ -1210,10 +1462,7 @@ async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if not username:
         context.user_data["admin_action"] = None
-        await update.message.reply_text(
-            "Niepoprawny username.",
-            reply_markup=build_main_menu(update.effective_user),
-        )
+        await update.message.reply_text("Niepoprawny username.")
         return
 
     if action == "ADMIN_ADD":
@@ -1238,31 +1487,6 @@ async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         with db_cursor() as cur:
             cur.execute("DELETE FROM cooldowns")
 
-    elif action == "ADMIN_BACKUP":
-        with db_cursor() as cur:
-            cur.execute("SELECT username, role FROM vendors")
-            rows = cur.fetchall()
-
-        text = "\n".join([f"{u}:{r}" for u, r in rows])
-        context.user_data["admin_action"] = None
-
-        await update.message.reply_text(
-            text if text else "Brak danych.",
-            reply_markup=build_main_menu(update.effective_user),
-        )
-        return
-
-    with db_cursor() as cur:
-        cur.execute("""
-            INSERT INTO audit_log(action, username, timestamp, metadata)
-            VALUES (?, ?, ?, ?)
-        """, (
-            action,
-            username,
-            int(time.time()),
-            ""
-        ))
-
     context.user_data["admin_action"] = None
 
     await update.message.reply_text(
@@ -1270,53 +1494,62 @@ async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=build_main_menu(update.effective_user),
     )
     # ============================================================
-# CZĘŚĆ 10/10 – SYSTEM POSTS + APPLICATION FACTORY + MAIN
+# CZĘŚĆ 12/12 – SYSTEM POSTS + APPLICATION FACTORY + MAIN
 # ============================================================
 
 async def system_wts(ctx: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📞 NAPISZ DO ADMINA", url="https://t.me/8482440165")],
-        [InlineKeyboardButton("💼 DODAJ OGŁOSZENIE", url=f"https://t.me/{BOT_USERNAME}?start=menu")]
+        [InlineKeyboardButton("💼 DODAJ OGŁOSZENIE", url=f"https://t.me/{BOT_USERNAME}")]
     ])
 
-    await ctx.bot.send_message(
-        chat_id=GROUP_ID,
-        message_thread_id=WTS_TOPIC,
-        text="<b>🔥 CHCESZ ZOSTAĆ VENDOREM?</b>\nVENDOR JEST DARMOWY (OKRES TESTOWY)",
-        parse_mode=ParseMode.HTML,
-        reply_markup=keyboard
-    )
+    try:
+        await ctx.bot.send_message(
+            chat_id=GROUP_ID,
+            message_thread_id=WTS_TOPIC,
+            text="<b>🔥 CHCESZ ZOSTAĆ VENDOREM?</b>\nNapisz do admina.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard
+        )
+    except Exception:
+        logger.exception("System WTS post failed")
 
 
 async def system_wtb(ctx: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 DODAJ OGŁOSZENIE", url=f"https://t.me/{BOT_USERNAME}?start=menu")]
+        [InlineKeyboardButton("📩 DODAJ OGŁOSZENIE", url=f"https://t.me/{BOT_USERNAME}")]
     ])
 
-    await ctx.bot.send_message(
-        chat_id=GROUP_ID,
-        message_thread_id=WTB_TOPIC,
-        text="<b>🛒 CHCESZ COŚ KUPIĆ?</b>\nDodaj ogłoszenie teraz!",
-        parse_mode=ParseMode.HTML,
-        reply_markup=keyboard
-    )
+    try:
+        await ctx.bot.send_message(
+            chat_id=GROUP_ID,
+            message_thread_id=WTB_TOPIC,
+            text="<b>🛒 CHCESZ COŚ KUPIĆ?</b>\nDodaj ogłoszenie teraz!",
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard
+        )
+    except Exception:
+        logger.exception("System WTB post failed")
 
 
 async def system_wtt(ctx: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 DODAJ OGŁOSZENIE", url=f"https://t.me/{BOT_USERNAME}?start=menu")]
+        [InlineKeyboardButton("📩 DODAJ OGŁOSZENIE", url=f"https://t.me/{BOT_USERNAME}")]
     ])
 
-    await ctx.bot.send_message(
-        chat_id=GROUP_ID,
-        message_thread_id=WTT_TOPIC,
-        text="<b>🔁 CHCESZ COŚ WYMIENIĆ?</b>\nDodaj ogłoszenie teraz!",
-        parse_mode=ParseMode.HTML,
-        reply_markup=keyboard
-    )
+    try:
+        await ctx.bot.send_message(
+            chat_id=GROUP_ID,
+            message_thread_id=WTT_TOPIC,
+            text="<b>🔁 CHCESZ COŚ WYMIENIĆ?</b>\nDodaj ogłoszenie teraz!",
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard
+        )
+    except Exception:
+        logger.exception("System WTT post failed")
 
 
 async def global_error_handler(update, context):
@@ -1354,17 +1587,20 @@ def main():
 
     # ================= COMMANDS =================
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("addvendor", cmd_addvendor))
+    app.add_handler(CommandHandler("removevendor", cmd_removevendor))
+    app.add_handler(CommandHandler("makevip", cmd_makevip))
+    app.add_handler(CommandHandler("removevip", cmd_removevip))
+    app.add_handler(CommandHandler("resetcooldown", cmd_resetcooldown))
 
-    # ================= CALLBACKS (SPECYFICZNE NAJPIERW) =================
+    # ================= CALLBACKS =================
     app.add_handler(CallbackQueryHandler(handle_interest, pattern="^INTEREST$"))
-    app.add_handler(CallbackQueryHandler(panel_callback, pattern="^PANEL_"))
+    app.add_handler(CallbackQueryHandler(panel_callback, pattern="^PANEL"))
     app.add_handler(CallbackQueryHandler(admin_panel, pattern="^ADMIN$"))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern="^ADMIN_"))
     app.add_handler(CallbackQueryHandler(callback_router))
 
-    # ================= MESSAGE ROUTERS =================
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, edit_handler))
+    # ================= MESSAGE ROUTER =================
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_router))
 
     # ================= SYSTEM POSTS (6H) =================
@@ -1376,7 +1612,7 @@ def main():
     # ================= RESTORE VIP AUTO =================
     restore_vip_jobs(app)
 
-    logger.info("MARKET BOT 4.0 ENTERPRISE STARTED")
+    logger.info("MARKET BOT FINAL STARTED")
 
     app.run_polling(drop_pending_updates=True)
 
