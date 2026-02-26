@@ -260,104 +260,142 @@ def bootstrap_roles():
             """, (u, time.strftime("%d.%m.%Y")))
 
     logger.info("Bootstrap roles loaded")
-    # ============================================================
-# FAZA 3/15 – STATE MACHINE ENGINE
+# ============================================================
+# FAZA 3/15 – STATE ENGINE (FIXED VERSION)
 # ============================================================
 
-# =========================
-# STATE INITIALIZATION
-# =========================
-
-def init_state(context):
-
-    if "initialized" not in context.user_data:
-        context.user_data.update({
-            "mode": None,
-            "wts_total": 0,
-            "wts_products": [],
-            "pending_text": None,
-            "city": None,
-            "admin_action": None,
-            "edit_mode": False,
-            "initialized": True
-        })
+def init_state(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Inicjalizuje state tylko jeśli nie istnieje.
+    NIE nadpisuje istniejących danych.
+    """
+    if "state_initialized" not in context.user_data:
+        context.user_data["mode"] = None
+        context.user_data["wts_total"] = 0
+        context.user_data["wts_products"] = []
+        context.user_data["pending_text"] = None
+        context.user_data["city"] = None
+        context.user_data["admin_action"] = None
+        context.user_data["edit_mode"] = False
+        context.user_data["state_initialized"] = True
 
 
-def reset_state(context):
-    context.user_data.clear()
-    init_state(context)
-
-
-# =========================
-# SAFE GETTERS
-# =========================
-
-def get_mode(context):
-    return context.user_data.get("mode")
-
-
-def set_mode(context, value: str):
-    context.user_data["mode"] = value
-
-
-def enable_edit_mode(context):
-    context.user_data["edit_mode"] = True
-
-
-def disable_edit_mode(context):
+def reset_state(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Czyści tylko kontrolowane pola, nie niszczy user_data całkowicie.
+    """
+    context.user_data["mode"] = None
+    context.user_data["wts_total"] = 0
+    context.user_data["wts_products"] = []
+    context.user_data["pending_text"] = None
+    context.user_data["city"] = None
+    context.user_data["admin_action"] = None
     context.user_data["edit_mode"] = False
 
 
-def is_edit_mode(context):
-    return context.user_data.get("edit_mode", False)
+# =========================
+# MODE CONTROL
+# =========================
+
+def set_mode(context: ContextTypes.DEFAULT_TYPE, mode: str):
+    context.user_data["mode"] = mode
 
 
-def set_admin_action(context, action: str):
-    context.user_data["admin_action"] = action
-
-
-def get_admin_action(context):
-    return context.user_data.get("admin_action")
-
-
-def clear_admin_action(context):
-    context.user_data["admin_action"] = None
+def get_mode(context: ContextTypes.DEFAULT_TYPE):
+    return context.user_data.get("mode")
 
 
 # =========================
-# WTS FLOW HELPERS
+# WTS FLOW CONTROL
 # =========================
 
-def set_wts_count(context, count: int):
-    context.user_data["wts_total"] = count
+def set_wts_count(context: ContextTypes.DEFAULT_TYPE, count: int):
+    """
+    Ustawia ilość produktów jako INT (nie string).
+    """
+    context.user_data["wts_total"] = int(count)
     context.user_data["wts_products"] = []
-    set_mode(context, "WTS_INPUT")
 
 
-def add_wts_product(context, line: str):
-    context.user_data["wts_products"].append(line)
+def add_wts_product(context: ContextTypes.DEFAULT_TYPE, product: str):
+    """
+    Dodaje produkt do listy.
+    """
+    products = context.user_data.get("wts_products")
+    if products is None:
+        context.user_data["wts_products"] = []
+        products = context.user_data["wts_products"]
+
+    products.append(product)
 
 
-def is_wts_complete(context) -> bool:
+def is_wts_complete(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Sprawdza czy podano wszystkie produkty.
+    """
     total = context.user_data.get("wts_total", 0)
-    current = len(context.user_data.get("wts_products", []))
-    return current >= total and total > 0
+    products = context.user_data.get("wts_products", [])
+
+    if not isinstance(total, int):
+        try:
+            total = int(total)
+        except Exception:
+            return False
+
+    return len(products) >= total and total > 0
 
 
-def get_next_wts_step(context) -> int:
-    return len(context.user_data.get("wts_products", [])) + 1
+def get_next_wts_step(context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Zwraca numer kolejnego produktu.
+    """
+    products = context.user_data.get("wts_products", [])
+    return len(products) + 1
 
 
 # =========================
-# WTB/WTT TEXT STORAGE
+# PENDING TEXT (WTB/WTT)
 # =========================
 
-def store_pending_text(context, text: str):
+def store_pending_text(context: ContextTypes.DEFAULT_TYPE, text: str):
     context.user_data["pending_text"] = text
 
 
-def get_pending_text(context):
+def get_pending_text(context: ContextTypes.DEFAULT_TYPE):
     return context.user_data.get("pending_text")
+
+
+# =========================
+# EDIT MODE
+# =========================
+
+def enable_edit_mode(context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["edit_mode"] = True
+
+
+def disable_edit_mode(context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["edit_mode"] = False
+
+
+def is_edit_mode(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    return context.user_data.get("edit_mode", False)
+
+
+# =========================
+# ADMIN ACTION
+# =========================
+
+def set_admin_action(context: ContextTypes.DEFAULT_TYPE, action: str):
+    context.user_data["admin_action"] = action
+
+
+def get_admin_action(context: ContextTypes.DEFAULT_TYPE):
+    return context.user_data.get("admin_action")
+
+
+def clear_admin_action(context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["admin_action"] = None
+    
     # ============================================================
 # FAZA 4/15 – ROLE & PERMISSION ENGINE
 # ============================================================
@@ -1795,4 +1833,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
