@@ -767,118 +767,87 @@ def hardcore_price_detect(text: str) -> bool:
         return True
 
     return False
-    # ============================================================
-# FAZA 7/15 – CALLBACK ROUTER (DETERMINISTIC)
+# ============================================================
+# FAZA 7/15 – CALLBACK ROUTER (DETERMINISTIC + STABLE)
 # ============================================================
 
 async def callback_router(update, context):
 
-if check_callback_rate_limit(user.id):
-    return
-    
+    # Safety guard
     if not update.callback_query:
         return
 
     query = update.callback_query
     user = query.from_user
 
+    # Callback spam protection (Faza 13)
+    if check_callback_rate_limit(user.id):
+        return
+
     await query.answer()
 
+    # FSM init (Faza 4)
     init_state(context)
 
     data = query.data
 
     # ========================================================
-    # MENU RESET
+    # PANEL
     # ========================================================
 
-    if data == "MENU":
-        reset_state(context)
-        await query.edit_message_text(
-            "Menu:",
-            reply_markup=build_main_menu(user)
-        )
+    if data == "PANEL":
+        await show_panel(update, context)
         return
 
     # ========================================================
-    # WTS START
+    # WTS FLOW
     # ========================================================
 
     if data == "WTS":
-
-        if not user.username:
-            await query.edit_message_text("Ustaw username w Telegramie.")
-            return
-
-        if not RoleManager.is_vendor(user.username):
-            await query.edit_message_text("Brak dostępu.")
-            return
-
-        set_mode(context, "WTS_SELECT_COUNT")
-
-        keyboard = []
-        row = []
-
-        for i in range(1, 11):
-            row.append(
-                InlineKeyboardButton(str(i), callback_data=f"WTS_COUNT_{i}")
-            )
-            if i % 5 == 0:
-                keyboard.append(row)
-                row = []
-
-        keyboard.append([InlineKeyboardButton("⬅ MENU", callback_data="MENU")])
-
-        await query.edit_message_text(
-            "Ile produktów?",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        context.user_data["mode"] = "WTS"
+        context.user_data["state"] = "WTS_SELECT_COUNT"
+        await query.message.reply_text("Ile produktów chcesz dodać? (1–5)")
         return
-
-    # ========================================================
-    # WTS COUNT SELECTED
-    # ========================================================
 
     if data.startswith("WTS_COUNT_"):
-
         try:
-            count = int(data.split("_")[2])
+            count = int(data.split("_")[-1])
         except Exception:
-            count = 1
+            await query.message.reply_text("Błąd wyboru ilości.")
+            return
 
-        set_wts_count(context, count)
-        set_mode(context, "WTS_INPUT")
+        context.user_data["count"] = count
+        context.user_data["products"] = []
+        context.user_data["state"] = "WTS_INPUT"
 
-        await query.edit_message_text(
-            "Podaj produkt 1:"
-        )
+        await query.message.reply_text("Podaj produkt 1:")
         return
 
     # ========================================================
-    # WTB START
+    # WTB FLOW
     # ========================================================
 
     if data == "WTB":
-
-        set_mode(context, "WTB")
-
-        await query.edit_message_text(
-            "Wpisz treść ogłoszenia WTB:"
-        )
+        context.user_data["mode"] = "WTB"
+        context.user_data["state"] = "WTB_INPUT"
+        await query.message.reply_text("Wpisz treść ogłoszenia WTB:")
         return
 
     # ========================================================
-    # WTT START
+    # WTT FLOW
     # ========================================================
 
     if data == "WTT":
-
-        set_mode(context, "WTT")
-
-        await query.edit_message_text(
-            "Wpisz treść ogłoszenia WTT:"
-        )
+        context.user_data["mode"] = "WTT"
+        context.user_data["state"] = "WTT_INPUT"
+        await query.message.reply_text("Wpisz treść ogłoszenia WTT:")
         return
+
+    # ========================================================
+    # UNKNOWN CALLBACK
+    # ========================================================
+
+    await query.message.reply_text("Nieznana akcja.")
         # ============================================================
 # FAZA 8/15 – MESSAGE ROUTER (FINAL FSM LOGIC)
 # ============================================================
@@ -1546,3 +1515,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
