@@ -657,121 +657,183 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
         # ============================================================
-# CZĘŚĆ 5/10 – CALLBACK ROUTER (WTS / WTB / WTT)
+# CZĘŚĆ 6/10 – MESSAGE ROUTER + FINALIZE WTS
 # ============================================================
 
-async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    query = update.callback_query
-    user = query.from_user
-    await query.answer()
+async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     init_state(context)
+    user = update.effective_user
+    text = update.message.text
 
-    # ================= MENU =================
-    if query.data == "MENU":
-        reset_state(context)
-        init_state(context)
-        await query.edit_message_text(
-            "Menu:",
-            reply_markup=build_main_menu(user),
-        )
+    # ================= ADMIN FLOW =================
+    if context.user_data.get("admin_action"):
         return
 
-    # ================= PANEL OPEN =================
-    if query.data == "PANEL":
-
-        if not user.username:
-            await query.edit_message_text("Brak username.")
-            return
-
-        username = user.username.lower()
-
-        if not RoleManager.is_vendor(username):
-            await query.edit_message_text("Brak dostępu.")
-            return
-
-        vendor = RoleManager.get_vendor(username)
-        role = vendor[1]
-        auto_enabled = vendor[5]
-
-        keyboard = [
-            [InlineKeyboardButton("🔁 REPOST", callback_data="PANEL_REPOST")],
-            [InlineKeyboardButton("✏ EDYTUJ", callback_data="PANEL_EDIT")],
-            [InlineKeyboardButton("📊 STATYSTYKI", callback_data="PANEL_STATS")],
-        ]
-
-        if role == "vip":
-            label = "🤖 AUTO OFF" if auto_enabled else "🤖 AUTO ON"
-            keyboard.append([InlineKeyboardButton(label, callback_data="PANEL_AUTO")])
-
-        keyboard.append([InlineKeyboardButton("⬅ MENU", callback_data="MENU")])
-
-        await query.edit_message_text(
-            "Panel vendora:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+    # ================= EDIT MODE =================
+    if context.user_data.get("edit_mode"):
         return
 
-    # ================= WTS START =================
-    if query.data == "WTS":
+    # ================= WTS INPUT =================
+    if context.user_data.get("mode") == "WTS_INPUT":
 
-        if not user.username or not RoleManager.is_vendor(user.username.lower()):
-            await query.edit_message_text("Brak dostępu.")
-            return
-
-        role = "vip" if RoleManager.is_vip(user.username.lower()) else "vendor"
-        cooldown_limit = 3 * 3600 if role == "vip" else 6 * 3600
-
-        if time.time() - get_last_post(user.id) < cooldown_limit:
-            await query.edit_message_text(
-                "Cooldown aktywny.",
+        if hardcore_price_detect(text):
+            await update.message.reply_text(
+                "❌ Zakaz podawania cen.",
                 reply_markup=back_button(),
             )
             return
 
-        context.user_data["mode"] = "WTS_COUNT"
+        emoji, masked = ultra_detect(text, listing_mode=True)
+        context.user_data["wts_products"].append(f"{emoji} {masked}")
 
-        keyboard = []
-        row = []
-        for i in range(1, 11):
-            row.append(
-                InlineKeyboardButton(str(i), callback_data=f"WTS_COUNT_{i}")
+        if len(context.user_data["wts_products"]) < context.user_data["wts_total"]:
+            next_step = len(context.user_data["wts_products"]) + 1
+            await update.message.reply_text(
+                f"Podaj produkt {next_step}:",
+                reply_markup=back_button(),
             )
-            if i % 5 == 0:
-                keyboard.append(row)
-                row = []
-        keyboard.append([InlineKeyboardButton("⬅ MENU", callback_data="MENU")])
+            return
 
-        await query.edit_message_text(
-            "Ile produktów?",
+        combined = " ".join(context.user_data["wts_products"])
+        detected_city = detect_city(combined)
+        context.user_data["city"] = detected_city
+
+        keyboard = [
+            [
+                InlineKeyboardButton("GDY", callback_data="CITY_GDY"),
+                InlineKeyboardButton("GDA", callback_data="CITY_GDA"),
+                InlineKeyboardButton("SOP", callback_data="CITY_SOP"),
+            ],
+            [InlineKeyboardButton("⬅ MENU", callback_data="MENU")],
+        ]
+
+        await update.message.reply_text(
+            f"Wykryto miasto: {detected_city}\nWybierz miasto:",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return
 
-    # ================= WTS COUNT =================
-    if query.data.startswith("WTS_COUNT_"):
-
-        count = int(query.data.split("_")[2])
-        context.user_data["mode"] = "WTS_INPUT"
-        context.user_data["wts_total"] = count
-        context.user_data["wts_products"] = []
-
-        await query.edit_message_text(
-            "Podaj produkt 1:",
-            reply_markup=back_button(),
-        )
-        return
-
     # ================= WTB / WTT =================
-    if query.data in ("WTB", "WTT"):
-        context.user_data["mode"] = query.data
-        await query.edit_message_text(
-            f"Wpisz treść ogłoszenia {query.data}:",
-            reply_markup=back_button(),
+    if context.user_data.get("mode") in ("WTB", "WTT"):
+
+        mode = context.user_data["mode"]
+
+        if hardcore_price_detect(text):
+            await update.message.reply_text("❌ Zakaz cen.")
+            return
+
+        emoji, masked = ultra_detect(text, listing_mode=True)
+        city = detect_city(text)
+
+        caption = (
+            f"<b>{mode} MARKET</b>\n\n"
+            f"{emoji} {masked}\n\n"
+            f"<b>📍 {city} | #3CITY</b>\n\n"
+            f"<b>🔥 INTEREST: 0</b>"
         )
+
+        msg = await update.message.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=WTB_TOPIC if mode == "WTB" else WTT_TOPIC,
+            photo=LOGO_URL,
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]]
+            ),
+        )
+
+        with db_cursor() as cur:
+            cur.execute("""
+                UPDATE vendors
+                SET posts = posts + 1,
+                    last_content = ?
+                WHERE username=?
+            """, (caption, user.username.lower() if user.username else ""))
+
+        set_last_post(user.id)
+
+        reset_state(context)
+
+        await update.message.reply_text(
+            "Opublikowano.",
+            reply_markup=build_main_menu(user),
+        )
+
+
+async def finalize_wts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    user = query.from_user
+
+    if not user.username:
+        await query.edit_message_text("Brak username.")
         return
-            # ============================================================
+
+    username = user.username.lower()
+    vendor = RoleManager.get_vendor(username)
+
+    if not vendor:
+        await query.edit_message_text("Brak dostępu.")
+        return
+
+    role = vendor[1]
+
+    city = context.user_data.get("city", "3CITY")
+    options = context.user_data.get("options", [])
+    content = "\n".join(context.user_data["wts_products"])
+
+    badge = ""
+    if role == "vip":
+        badge = "<b>👑 VIP VENDOR</b>\n"
+
+    option_text = ""
+    if options:
+        option_text = "\n" + " | ".join(options)
+
+    caption = (
+        f"<b>💎 WTS MARKET 💎</b>\n\n"
+        f"{badge}"
+        f"<b>@{html.escape(username)}</b>\n"
+        f"<b>📍 {city}</b>{option_text}\n\n"
+        f"{content}\n\n"
+        f"<b>🔥 INTEREST: 0</b>"
+    )
+
+    msg = await query.bot.send_photo(
+        chat_id=GROUP_ID,
+        message_thread_id=WTS_TOPIC,
+        photo=LOGO_URL,
+        caption=caption,
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔥 INTEREST", callback_data="INTEREST")]]
+        ),
+    )
+
+    if role == "vip":
+        try:
+            await query.bot.pin_chat_message(GROUP_ID, msg.message_id)
+        except Exception:
+            pass
+
+    with db_cursor() as cur:
+        cur.execute("""
+            UPDATE vendors
+            SET posts = posts + 1,
+                last_content = ?
+            WHERE username=?
+        """, (caption, username))
+
+    set_last_post(user.id)
+    reset_state(context)
+
+    await query.edit_message_text(
+        "Opublikowano.",
+        reply_markup=build_main_menu(user),
+    )
+    # ============================================================
 # CZĘŚĆ 7/10 – INTEREST SYSTEM + AUTO DELETE + VIP AUTO
 # ============================================================
 
