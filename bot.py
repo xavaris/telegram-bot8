@@ -839,127 +839,172 @@ def build_wtt_layout(city: str, content: str) -> str:
         f"{content}\n\n"
         f"<b>📍 {city} | #WTT</b>"
     )
-    # ============================================================
-# FAZA 8/15 – CALLBACK ROUTER (PURE DISPATCHER)
+# ============================================================
+# FAZA 8/15 – MESSAGE ROUTER + FINAL PUBLISH
 # ============================================================
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ParseMode
-from telegram.ext import ContextTypes
-
-
-async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    query = update.callback_query
-    user = query.from_user
-
-    await query.answer()
+async def message_router(update, context):
     init_state(context)
 
-    # ================= GLOBAL RATE LIMIT =================
-    if not check_global_rate_limit(user.id):
+    if not update.message:
         return
 
-    data = query.data
+    text = update.message.text.strip()
+    mode = get_mode(context)
 
-    # ================= MENU =================
-    if data == "MENU":
+    # ========================================================
+    # ========================= WTS ==========================
+    # ========================================================
+
+    if mode == "WTS_INPUT":
+
+        if hardcore_price_detect(text):
+            await update.message.reply_text("❌ Zakaz cen.")
+            return
+
+        emoji, masked = ultra_detect(text, listing_mode=True)
+        add_wts_product(context, f"{emoji} {masked}")
+
+        if not is_wts_complete(context):
+            next_step = get_next_wts_step(context)
+            await update.message.reply_text(f"Podaj produkt {next_step}:")
+            return
+
+        set_mode(context, "WTS_CITY")
+        await update.message.reply_text("Podaj miasto (GDA, GDY, SOP):")
+        return
+
+
+    if mode == "WTS_CITY":
+
+        city = text.upper()
+
+        if city not in ["GDA", "GDY", "SOP"]:
+            await update.message.reply_text("Podaj poprawne miasto (GDA, GDY, SOP).")
+            return
+
+        context.user_data["city"] = city
+
+        try:
+            await publish_wts(update, context)
+            await update.message.reply_text("Opublikowano.")
+        except Exception:
+            logger.exception("WTS publish error")
+            await update.message.reply_text("Błąd publikacji.")
+
         reset_state(context)
-        await query.edit_message_text(
-            "Menu:",
-            reply_markup=build_main_menu(user)
-        )
         return
 
-    # ================= PANEL =================
-    if data == "PANEL":
-        await open_vendor_panel(update, context)
-        return
 
-    # ================= ADMIN PANEL =================
-    if data == "ADMIN":
-        await open_admin_panel(update, context)
-        return
+    # ========================================================
+    # ====================== WTB / WTT =======================
+    # ========================================================
 
-    # ================= WTS START =================
-    if data == "WTS":
+    if mode in ["WTB", "WTT"]:
 
-        if not user.username or not RoleManager.is_vendor(user.username):
-            await query.edit_message_text("Brak dostępu.")
+        if hardcore_price_detect(text):
+            await update.message.reply_text("❌ Zakaz cen.")
             return
 
-        if not check_vendor_cooldown(user.id, user.username):
-            await query.edit_message_text("Cooldown aktywny.")
+        store_pending_text(context, text)
+        set_mode(context, "WTX_CITY")
+
+        await update.message.reply_text("Podaj miasto (GDA, GDY, SOP):")
+        return
+
+
+    if mode == "WTX_CITY":
+
+        city = text.upper()
+
+        if city not in ["GDA", "GDY", "SOP"]:
+            await update.message.reply_text("Podaj poprawne miasto (GDA, GDY, SOP).")
             return
 
-        set_mode(context, "WTS_COUNT")
+        context.user_data["city"] = city
 
-        keyboard = []
-        row = []
+        try:
+            await publish_wtx(update, context)
+            await update.message.reply_text("Opublikowano.")
+        except Exception:
+            logger.exception("WTX publish error")
+            await update.message.reply_text("Błąd publikacji.")
 
-        for i in range(1, 11):
-            row.append(
-                InlineKeyboardButton(str(i), callback_data=f"WTS_COUNT_{i}")
-            )
-            if i % 5 == 0:
-                keyboard.append(row)
-                row = []
-
-        keyboard.append([InlineKeyboardButton("⬅ MENU", callback_data="MENU")])
-
-        await query.edit_message_text(
-            "Ile produktów?",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        reset_state(context)
         return
 
-    # ================= WTS COUNT =================
-    if data.startswith("WTS_COUNT_"):
 
-        count = int(data.split("_")[2])
-        set_wts_count(context, count)
 
-        await query.edit_message_text(
-            "Podaj produkt 1:",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅ MENU", callback_data="MENU")]]
-            )
-        )
-        return
+# ============================================================
+# PUBLISH – WTS
+# ============================================================
 
-    # ================= WTB =================
-    if data == "WTB":
+async def publish_wts(update, context):
 
-        if not check_wtb_wtt_cooldown(user.id):
-            await query.edit_message_text("Cooldown 10 minut.")
-            return
+    user = update.effective_user
 
-        set_mode(context, "WTB_INPUT")
+    if not user.username:
+        raise Exception("User has no username")
 
-        await query.edit_message_text(
-            "Wpisz treść ogłoszenia WTB:",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅ MENU", callback_data="MENU")]]
-            )
-        )
-        return
+    city = context.user_data.get("city")
+    products = context.user_data.get("wts_products", [])
 
-    # ================= WTT =================
-    if data == "WTT":
+    if not products:
+        raise Exception("No products in WTS publish")
 
-        if not check_wtb_wtt_cooldown(user.id):
-            await query.edit_message_text("Cooldown 10 minut.")
-            return
+    products_text = "\n".join(products)
 
-        set_mode(context, "WTT_INPUT")
+    caption = (
+        f"<b>💎 WTS MARKET</b>\n\n"
+        f"<b>@{user.username}</b>\n"
+        f"<b>📍 {city}</b>\n\n"
+        f"{products_text}"
+    )
 
-        await query.edit_message_text(
-            "Wpisz treść ogłoszenia WTT:",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅ MENU", callback_data="MENU")]]
-            )
-        )
-        return
+    await context.bot.send_photo(
+        chat_id=GROUP_ID,
+        message_thread_id=WTS_TOPIC,
+        photo=LOGO_URL,
+        caption=caption,
+        parse_mode="HTML"
+    )
+
+
+
+# ============================================================
+# PUBLISH – WTB / WTT
+# ============================================================
+
+async def publish_wtx(update, context):
+
+    user = update.effective_user
+
+    if not user.username:
+        raise Exception("User has no username")
+
+    city = context.user_data.get("city")
+    text = get_pending_text(context)
+    mode = get_mode(context)
+
+    if not text:
+        raise Exception("No text for WTB/WTT")
+
+    topic = WTB_TOPIC if mode == "WTB" else WTT_TOPIC
+
+    caption = (
+        f"<b>{mode} MARKET</b>\n\n"
+        f"<b>@{user.username}</b>\n"
+        f"<b>📍 {city}</b>\n\n"
+        f"{text}"
+    )
+
+    await context.bot.send_photo(
+        chat_id=GROUP_ID,
+        message_thread_id=topic,
+        photo=LOGO_URL,
+        caption=caption,
+        parse_mode="HTML"
+    )
         # ============================================================
 # FAZA 9/15 – UNIFIED MESSAGE ROUTER
 # ============================================================
@@ -1816,6 +1861,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
