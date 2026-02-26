@@ -261,10 +261,10 @@ def bootstrap_roles():
 
     logger.info("Bootstrap roles loaded")
 # ============================================================
-# FAZA 3/15 – STATE ENGINE (FIXED VERSION)
+# FAZA 3/15 – STATE ENGINE (FINAL STABLE VERSION)
 # ============================================================
 
-def init_state(context: ContextTypes.DEFAULT_TYPE):
+def init_state(context):
     """
     Inicjalizuje state tylko jeśli nie istnieje.
     NIE nadpisuje istniejących danych.
@@ -280,10 +280,7 @@ def init_state(context: ContextTypes.DEFAULT_TYPE):
         context.user_data["state_initialized"] = True
 
 
-def reset_state(context: ContextTypes.DEFAULT_TYPE):
-    """
-    Czyści tylko kontrolowane pola, nie niszczy user_data całkowicie.
-    """
+def reset_state(context):
     context.user_data["mode"] = None
     context.user_data["wts_total"] = 0
     context.user_data["wts_products"] = []
@@ -297,11 +294,11 @@ def reset_state(context: ContextTypes.DEFAULT_TYPE):
 # MODE CONTROL
 # =========================
 
-def set_mode(context: ContextTypes.DEFAULT_TYPE, mode: str):
+def set_mode(context, mode: str):
     context.user_data["mode"] = mode
 
 
-def get_mode(context: ContextTypes.DEFAULT_TYPE):
+def get_mode(context):
     return context.user_data.get("mode")
 
 
@@ -309,46 +306,32 @@ def get_mode(context: ContextTypes.DEFAULT_TYPE):
 # WTS FLOW CONTROL
 # =========================
 
-def set_wts_count(context: ContextTypes.DEFAULT_TYPE, count: int):
-    """
-    Ustawia ilość produktów jako INT (nie string).
-    """
+def set_wts_count(context, count: int):
     context.user_data["wts_total"] = int(count)
     context.user_data["wts_products"] = []
 
 
-def add_wts_product(context: ContextTypes.DEFAULT_TYPE, product: str):
-    """
-    Dodaje produkt do listy.
-    """
+def add_wts_product(context, product: str):
     products = context.user_data.get("wts_products")
     if products is None:
         context.user_data["wts_products"] = []
         products = context.user_data["wts_products"]
-
     products.append(product)
 
 
-def is_wts_complete(context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """
-    Sprawdza czy podano wszystkie produkty.
-    """
+def is_wts_complete(context) -> bool:
     total = context.user_data.get("wts_total", 0)
     products = context.user_data.get("wts_products", [])
 
-    if not isinstance(total, int):
-        try:
-            total = int(total)
-        except Exception:
-            return False
+    try:
+        total = int(total)
+    except Exception:
+        return False
 
     return len(products) >= total and total > 0
 
 
-def get_next_wts_step(context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Zwraca numer kolejnego produktu.
-    """
+def get_next_wts_step(context) -> int:
     products = context.user_data.get("wts_products", [])
     return len(products) + 1
 
@@ -357,11 +340,11 @@ def get_next_wts_step(context: ContextTypes.DEFAULT_TYPE) -> int:
 # PENDING TEXT (WTB/WTT)
 # =========================
 
-def store_pending_text(context: ContextTypes.DEFAULT_TYPE, text: str):
+def store_pending_text(context, text: str):
     context.user_data["pending_text"] = text
 
 
-def get_pending_text(context: ContextTypes.DEFAULT_TYPE):
+def get_pending_text(context):
     return context.user_data.get("pending_text")
 
 
@@ -369,15 +352,15 @@ def get_pending_text(context: ContextTypes.DEFAULT_TYPE):
 # EDIT MODE
 # =========================
 
-def enable_edit_mode(context: ContextTypes.DEFAULT_TYPE):
+def enable_edit_mode(context):
     context.user_data["edit_mode"] = True
 
 
-def disable_edit_mode(context: ContextTypes.DEFAULT_TYPE):
+def disable_edit_mode(context):
     context.user_data["edit_mode"] = False
 
 
-def is_edit_mode(context: ContextTypes.DEFAULT_TYPE) -> bool:
+def is_edit_mode(context) -> bool:
     return context.user_data.get("edit_mode", False)
 
 
@@ -385,15 +368,15 @@ def is_edit_mode(context: ContextTypes.DEFAULT_TYPE) -> bool:
 # ADMIN ACTION
 # =========================
 
-def set_admin_action(context: ContextTypes.DEFAULT_TYPE, action: str):
+def set_admin_action(context, action: str):
     context.user_data["admin_action"] = action
 
 
-def get_admin_action(context: ContextTypes.DEFAULT_TYPE):
+def get_admin_action(context):
     return context.user_data.get("admin_action")
 
 
-def clear_admin_action(context: ContextTypes.DEFAULT_TYPE):
+def clear_admin_action(context):
     context.user_data["admin_action"] = None
     
     # ============================================================
@@ -1833,5 +1816,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
