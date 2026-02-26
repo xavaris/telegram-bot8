@@ -1567,9 +1567,23 @@ async def cmd_makevip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     RoleManager.set_vip(username)
 
     await update.message.reply_text("Nadano VIP.")
-    # ============================================================
-# FAZA 13/15 – APPLICATION WIRING
 # ============================================================
+# FAZA 13/15 – APPLICATION WIRING (FIXED VERSION)
+# ============================================================
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
+
+# =========================
+# START COMMAND
+# =========================
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -1581,12 +1595,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# =========================
+# MAIN MENU BUILDER
+# =========================
+
 def build_main_menu(user):
 
     keyboard = []
     row = []
 
-    if user.username and RoleManager.is_vendor(user.username):
+    username = user.username.lower() if user.username else ""
+
+    if username and RoleManager.is_vendor(username):
         row.append(InlineKeyboardButton("💼 WTS", callback_data="WTS"))
 
     row.append(InlineKeyboardButton("🛒 WTB", callback_data="WTB"))
@@ -1594,43 +1614,69 @@ def build_main_menu(user):
 
     keyboard.append(row)
 
-    if user.username and RoleManager.is_vendor(user.username):
-        keyboard.append([InlineKeyboardButton("📊 PANEL", callback_data="PANEL")])
+    if username and RoleManager.is_vendor(username):
+        keyboard.append([
+            InlineKeyboardButton("📊 PANEL", callback_data="PANEL")
+        ])
 
     if RoleManager.is_admin(user.id):
-        keyboard.append([InlineKeyboardButton("⚙ ADMIN PANEL", callback_data="ADMIN")])
+        keyboard.append([
+            InlineKeyboardButton("⚙ ADMIN PANEL", callback_data="ADMIN")
+        ])
 
     return InlineKeyboardMarkup(keyboard)
 
+
+# =========================
+# GLOBAL ERROR HANDLER
+# =========================
 
 async def global_error_handler(update, context):
     logger.exception("Unhandled exception", exc_info=context.error)
 
 
+# =========================
+# CREATE APPLICATION
+# =========================
+
 def create_application() -> Application:
 
     app = Application.builder().token(TOKEN).build()
 
-    # ========= ERROR HANDLER =========
+    # ===== ERROR HANDLER =====
     app.add_error_handler(global_error_handler)
 
-    # ========= COMMANDS =========
+    # ===== COMMANDS =====
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("addvendor", cmd_addvendor))
     app.add_handler(CommandHandler("makevip", cmd_makevip))
 
-    # ========= CALLBACK (JEDEN ROUTER + SPECYFICZNE) =========
-    app.add_handler(CallbackQueryHandler(handle_panel_action, pattern="^PANEL_"))
-    app.add_handler(CallbackQueryHandler(handle_admin_callback, pattern="^ADMIN_"))
-    app.add_handler(CallbackQueryHandler(callback_router))
+    # ===== CALLBACKS =====
+    app.add_handler(
+        CallbackQueryHandler(handle_panel_action, pattern="^PANEL_")
+    )
 
-    # ========= MESSAGE ROUTER (JEDEN) =========
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_router))
+    app.add_handler(
+        CallbackQueryHandler(handle_admin_callback, pattern="^ADMIN_")
+    )
 
-    # ========= VIP AUTO RESTORE =========
+    app.add_handler(
+        CallbackQueryHandler(guarded_callback_router)
+    )
+
+    # ===== MESSAGE ROUTER =====
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            guarded_message_router
+        )
+    )
+
+    # ===== RESTORE VIP AUTO =====
     restore_vip_jobs(app)
 
     return app
+    
     # ============================================================
 # FAZA 14/15 – RUNTIME GUARDS & STABILITY LAYER
 # ============================================================
@@ -1749,3 +1795,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
