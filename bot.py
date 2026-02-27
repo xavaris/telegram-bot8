@@ -102,7 +102,6 @@ def get_product_emoji(name: str) -> str:
 
     product_groups = {
 
-        # ===== MDMA PIGUŁY =====
         "💜": [
             "pix", "pixy", "piksy", "piksi",
             "eksta", "exta", "extasy", "ecstasy",
@@ -110,7 +109,6 @@ def get_product_emoji(name: str) -> str:
             "pharaoh", "tesla", "bluepunisher"
         ],
 
-        # ===== SYNTH KRYSZTAŁ =====
         "💎": [
             "mewa", "3cmc", "4mmc", "cmc", "mmc",
             "kryx", "krysztal", "kryształ",
@@ -119,65 +117,6 @@ def get_product_emoji(name: str) -> str:
             "mdma crystal", "mdma krysztal"
         ],
 
-        # ===== BIAŁE / KOKOS =====
-        "❄️": [
-            "koks", "kokos", "koko",
-            "koperta", "coke", "cocaina", "kokaina",
-            "biała", "biala", "biały", "bialy",
-            "sniff", "kreska", "kreski"
-        ],
-
-        "🌿": [
-            "weed", "buch", "jazz", "jaaz",
-            "trawa", "ziolo", "zielone", "buszek"
-        ],
-
-        "🍫": [
-            "hasz", "haszysz", "czekolada", "haszyk"
-        ],
-
-        "💊": [
-            "xanax", "alpra", "alprazolam",
-            "clonazepam", "rivotril", "diazepam",
-            "tabs", "tabsy", "tabletki",
-            "pigula", "piguły", "pigułki"
-        ],
-
-        "💨": ["vape", "vap", "liquid", "liq", "pod", "salt"],
-
-        "🚬": ["epapieros", "e-papieros", "epapierosy", "e-papierosy"],
-
-        "✨": ["blinker", "blink", "blinkery"]
-    }
-
-    for emoji, keywords in product_groups.items():
-        for key in keywords:
-            if key in normalized:
-                return emoji
-
-    return "📦"def get_product_emoji(name: str) -> str:
-    normalized = normalize_text(name)
-
-    product_groups = {
-
-        # ===== MDMA PIGUŁY =====
-        "💜": [
-            "pix", "pixy", "piksy", "piksi",
-            "eksta", "exta", "extasy", "ecstasy",
-            "mitsubishi", "lego", "superman", "rolls",
-            "pharaoh", "tesla", "bluepunisher"
-        ],
-
-        # ===== SYNTH KRYSZTAŁ =====
-        "💎": [
-            "mewa", "3cmc", "4mmc", "cmc", "mmc",
-            "kryx", "krysztal", "kryształ",
-            "crystal", "ice",
-            "mefedron", "mefa", "mef",
-            "mdma crystal", "mdma krysztal"
-        ],
-
-        # ===== BIAŁE / KOKOS =====
         "❄️": [
             "koks", "kokos", "koko",
             "koperta", "coke", "cocaina", "kokaina",
@@ -756,6 +695,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
