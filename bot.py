@@ -569,8 +569,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ================= FAST POST =================
     if query.data == "FAST_POST":
         data = last_ads.get(user.id)
+
         if not data:
-            await query.edit_message_text("<b>BRAK ZAPISANEGO OGŁOSZENIA.</b>", parse_mode="HTML")
+            await query.edit_message_text(
+                "<b>BRAK ZAPISANEGO OGŁOSZENIA.</b>",
+                parse_mode="HTML"
+            )
             return
 
         context.user_data["wts_products"] = data["products"]
@@ -580,7 +584,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await publish(update, context)
         return
 
-           if query.data == "NEW_WTS":
+    # ================= NOWE WTS =================
+    if query.data == "NEW_WTS":
 
         if not user.username:
             await query.edit_message_text(
@@ -1015,6 +1020,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
