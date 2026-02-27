@@ -95,120 +95,88 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"[^a-z0-9]", "", text)
     return text
 
-product_groups = {
+# ================= ULTRA PRODUCT DETECTION =================
 
-    # 🇵🇱 AMFETAMINA (POLSKA)
-    "🇵🇱": [
-        "feta", "amfa", "amfetamina",
-        "polak",
-        "krajowka", "krajowa", "krajuwa"
-    ],
+def get_product_emoji(name: str) -> str:
+    normalized = normalize_text(name)
 
-    # 💜 EKSTAZY
-    "💜": [
-        "pix", "pixy", "piksy", "piksi",
-        "eksta", "exta", "extasy", "ecstasy",
-        "mitsubishi", "lego", "superman",
-        "rolls", "pharaoh", "tesla", "bluepunisher"
-    ],
+    product_groups = {
 
-    # 💎 MEPH / CMC
-    "💎": [
-        "mewa", "3cmc", "4mmc", "cmc", "mmc",
-        "kryx", "krysztal", "crystal", "ice",
-        "mefedron", "mefa", "mef",
-        "kamien", "bezwonny"
-    ],
+        "💜": [
+            "pix", "pixy", "piksy", "piksi",
+            "eksta", "exta", "extasy", "ecstasy",
+            "mitsubishi", "lego", "superman", "rolls",
+            "pharaoh", "tesla", "bluepunisher"
+        ],
 
-    # ❄️ KOKAINA
-    "❄️": [
-        "koks", "kokos", "koko",
-        "coke", "cocaina", "kokaina",
-        "biala", "bialy",
-        "sniff", "kreska", "kreski"
-    ],
+        "💎": [
+            "mewa", "3cmc", "4mmc", "cmc", "mmc",
+            "kryx", "krysztal", "kryształ",
+            "crystal", "ice",
+            "mefedron", "mefa", "mef", "kamien", "kamień", "bezwonny"
+        ],
 
-    # 🌿 WEED
-    "🌿": [
-        "weed", "buch", "jazz",
-        "trawa", "ziolo", "zielone",
-        "buszek", "haze", "cali", "w33d"
-    ],
+        "❄️": [
+            "koks", "kokos", "koko",
+            "koperta", "coke", "cocaina", "kokaina",
+            "biała", "biala", "biały", "bialy",
+            "sniff", "kreska", "kreski"
+        ],
 
-    # 🍫 HASZ
-    "🍫": [
-        "hasz", "haszysz", "czekolada", "haszyk"
-    ],
+        "🌿": [
+            "weed", "buch", "jazz", "jaaz",
+            "trawa", "ziolo", "zielone", "buszek", "haze", "cali"
+        ],
 
-    # 🌙 NASENNE
-    "🌙": [
-        "zolpidem", "stilnox",
-        "nasen", "sleep"
-    ],
+        "🍫": [
+            "hasz", "haszysz", "czekolada", "haszyk"
+        ],
 
-    # 💊 OPIOIDY
-    "💊": [
-        "dhc",
-        "kodeina", "codeine",
-        "opioid",
-        "oxy", "oxycodone"
-    ],
+        "💊": [
+            "xanax", "alpra", "alprazolam",
+            "clonazepam", "rivotril", "diazepam",
+            "tabs", "tabsy", "tabletki",
+            "pigula", "piguły", "pigułki"
+        ],
 
-    # 💪 STERYDY
-    "💪": [
-        "testosteron", "test", "enan",
-        "prop", "tren", "deca",
-        "bold", "winstrol",
-        "anavar", "oxandrolone",
-        "dianabol", "meta"
-    ],
+        "💨": [
+            "vape", "vap", "liquid", "liq",
+            "pod", "salt", "jednorazowka"
+        ],
 
-    # 🧠 KETAMINA
-    "🧠": [
-        "keta", "ketamina", "ket"
-    ],
+        "🛢": [
+            "cart", "cartridge", "kartridz",
+            "wkład", "wklad", "thc cart"
+        ],
 
-    # 🍄 GRZYBY
-    "🍄": [
-        "grzyby", "grzybki", "grzyb",
-        "lizy", "lysiczki"
-    ],
+        "🧴": [
+            "perfumy", "perfum", "perfumka",
+            "dior", "chanel", "gucci",
+            "armani", "versace", "tom ford"
+        ],
 
-    # 💨 VAPE
-    "💨": [
-        "vape", "vap", "liquid", "liq",
-        "pod", "salt", "jednorazowka"
-    ],
+        "🚬": [
+            "epapieros", "e-papieros",
+            "epapierosy", "e-papierosy"
+        ],
 
-    # 🛢 CARTRIDGE
-    "🛢": [
-        "cart", "cartridge", "kartridz",
-        "wklad"
-    ],
+        "✨": [
+            "blinker", "blink", "blinkery"
+        ],
 
-    # 🧴 PERFUMY
-    "🧴": [
-        "perfumy", "perfum", "perfumka",
-        "dior", "chanel", "gucci",
-        "armani", "versace", "tom ford"
-    ],
+        "💳": [
+            "sim", "starter", "karta sim", "karty sim",
+            "starter sim", "esim", "SIMKI"
+        ]
+    }
 
-    # 🚬 E-PAPIEROSY
-    "🚬": [
-        "epapieros", "epapierosy"
-    ],
+    for emoji, keywords in product_groups.items():
+        for key in keywords:
+            if key in normalized:
+                return emoji
 
-    # ✨ BLINKERY
-    "✨": [
-        "blinker", "blink", "blinkery"
-    ],
+    return "📦"
 
-    # 💳 KARTY SIM
-    "💳": [
-        "sim", "starter", "kartasim",
-        "startersim", "esim", "simki"
-    ]
-}
 # ================= ULTRA HARDCORE PRICE DETECTOR V3 =================
 def contains_price_hardcore(text: str) -> bool:
 
@@ -1035,6 +1003,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
