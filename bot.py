@@ -100,69 +100,69 @@ def normalize_text(text: str) -> str:
 def get_product_emoji(name: str) -> str:
     normalized = normalize_text(name)
 
-product_groups = {
+    product_groups = {
+        "💜": [
+            "pix", "pixy", "piksy", "piksi",
+            "eksta", "exta", "extasy", "ecstasy",
+            "mitsubishi", "lego", "superman", "rolls",
+            "pharaoh", "tesla", "bluepunisher"
+        ],
 
-    "💜": [
-        "pix", "pixy", "piksy", "piksi",
-        "eksta", "exta", "extasy", "ecstasy",
-        "mitsubishi", "lego", "superman", "rolls",
-        "pharaoh", "tesla", "bluepunisher"
-    ],
+        "💎": [
+            "mewa", "3cmc", "4mmc", "cmc", "mmc",
+            "kryx", "krysztal", "kryształ",
+            "crystal", "ice",
+            "mefedron", "mefa", "mef"
+        ],
 
-    "💎": [
-        "mewa", "3cmc", "4mmc", "cmc", "mmc",
-        "kryx", "krysztal", "kryształ",
-        "crystal", "ice",
-        "mefedron", "mefa", "mef",
-        "mdma crystal", "mdma krysztal"
-    ],
+        "❄️": [
+            "koks", "kokos", "koko",
+            "koperta", "coke", "cocaina", "kokaina",
+            "biała", "biala", "biały", "bialy",
+            "sniff", "kreska", "kreski"
+        ],
 
-    "❄️": [
-        "koks", "kokos", "koko",
-        "koperta", "coke", "cocaina", "kokaina",
-        "biała", "biala", "biały", "bialy",
-        "sniff", "kreska", "kreski"
-    ],
+        "🌿": [
+            "weed", "buch", "jazz", "jaaz",
+            "trawa", "ziolo", "zielone", "buszek"
+        ],
 
-    "🌿": [
-        "weed", "buch", "jazz", "jaaz",
-        "trawa", "ziolo", "zielone", "buszek"
-    ],
+        "🍫": [
+            "hasz", "haszysz", "czekolada", "haszyk"
+        ],
 
-    "🍫": [
-        "hasz", "haszysz", "czekolada", "haszyk"
-    ],
+        "💊": [
+            "xanax", "alpra", "alprazolam",
+            "clonazepam", "rivotril", "diazepam",
+            "tabs", "tabsy", "tabletki",
+            "pigula", "piguły", "pigułki"
+        ],
 
-    "💊": [
-        "xanax", "alpra", "alprazolam",
-        "clonazepam", "rivotril", "diazepam",
-        "tabs", "tabsy", "tabletki",
-        "pigula", "piguły", "pigułki"
-    ],
+        "💨": [
+            "vape", "vap", "liquid", "liq",
+            "pod", "salt", "jednorazowka"
+        ],
 
-    # ===== VAPE =====
-    "💨": [
-        "vape", "vap", "liquid", "liq",
-        "pod", "salt", "jednorazowka"
-    ],
+        "🛢": [
+            "cart", "cartridge", "kartridz",
+            "wkład", "wklad", "thc cart"
+        ],
 
-    # ===== CARTRIDGE =====
-    "🛢": [
-        "cart", "cartridge", "kartridz",
-        "wkład", "wklad", "thc cart"
-    ],
+        "🧴": [
+            "perfumy", "perfum", "perfumka",
+            "dior", "chanel", "gucci",
+            "armani", "versace", "tom ford"
+        ],
 
-    # ===== PERFUMY =====
-    "🧴": [
-        "perfumy", "perfum", "perfumka",
-        "dior", "chanel", "gucci",
-        "armani", "versace", "tom ford"
-    ],
+        "🚬": [
+            "epapieros", "e-papieros",
+            "epapierosy", "e-papierosy"
+        ],
 
-    "🚬": ["epapieros", "e-papieros", "epapierosy", "e-papierosy"],
-
-    "✨": ["blinker", "blink", "blinkery"]
-}
+        "✨": [
+            "blinker", "blink", "blinkery"
+        ]
+    }
 
     for emoji, keywords in product_groups.items():
         for key in keywords:
@@ -712,6 +712,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
