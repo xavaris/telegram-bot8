@@ -947,7 +947,17 @@ async def publish(update, context):
             [option_map[o] for o in options_raw if o in option_map]
         )
 
-        reply_markup = None
+        # ✅ PRZYCISK KONTAKT Z VENDOREM POD OGŁOSZENIEM WTS
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📩 KONTAKT Z VENDOREM", url=f"https://t.me/{user.username}")]
+        ])
+
+        # ✅ ZAPISZ OSTATNIE OGŁOSZENIE (ŻEBY POJAWIŁ SIĘ PRZYCISK "WYŚLIJ PONOWNIE" W PANELU WTS)
+        last_ads[user.id] = {
+            "products": list(context.user_data.get("wts_products", [])),
+            "city": context.user_data.get("city"),
+            "options": list(context.user_data.get("options", []))
+        }
 
     # ================= WTB / WTT =================
     else:
@@ -1051,6 +1061,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
