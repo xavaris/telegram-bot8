@@ -113,7 +113,7 @@ def get_product_emoji(name: str) -> str:
             "mewa", "3cmc", "4mmc", "cmc", "mmc",
             "kryx", "krysztal", "kryształ",
             "crystal", "ice",
-            "mefedron", "mefa", "mef"
+            "mefedron", "mefa", "mef", "kamien", "kamień", "bezwonny"
         ],
 
         "❄️": [
@@ -177,29 +177,55 @@ def get_product_emoji(name: str) -> str:
 
     return "📦"
 
-# ================= HARDCORE PRICE DETECTOR =================
+# ================= ULTRA HARDCORE PRICE DETECTOR V2 =================
 def contains_price_hardcore(text: str) -> bool:
+
     lines = text.split("\n")
 
     for line in lines:
+
         clean = reverse_leet(line.lower().strip())
         normalized = re.sub(r"[^a-z0-9\s\-:]", "", clean)
 
+        # =========================================
+        # 🔥 WYJĄTKI PRODUKTOWE (DOZWOLONE)
+        # =========================================
+
+        # 3cmc / 4mmc / 2cb itp
         if re.fullmatch(r"\d+(cmc|mmc|cb)", normalized):
             continue
 
-        if re.search(r"\b\d+\s*(g|szt|tabs|ml)?\s*[-:]\s*\d{2,5}\b", normalized):
+        # dawki np 250mg / 250 mg
+        if re.search(r"\b\d+\s*mg\b", normalized):
+            # jeśli brak drugiej liczby → OK
+            if not re.search(r"\b\d+\s*mg\b.*\b\d{2,5}\b", normalized):
+                continue
+
+        # =========================================
+        # 🔴 MOCNE WYKRYWANIE CEN
+        # =========================================
+
+        # schemat: 1 - 50 / 2-100 / 1:50
+        if re.search(r"\b\d+\s*[-:]\s*\d{2,5}\b", normalized):
             return True
 
-        if re.search(r"\b\d+\s*(g|szt|tabs|ml)\s+\d{2,5}\b", normalized):
+        # schemat: 1 50 / 2 100
+        if re.search(r"\b\d+\s+\d{2,5}\b", normalized):
             return True
 
+        # gramatura + cena np 1g 50
+        if re.search(r"\b\d+\s*(g|ml|szt|tabs)\s+\d{2,5}\b", normalized):
+            return True
+
+        # sama liczba 2-5 cyfr
         if re.fullmatch(r"\d{2,5}", normalized):
             return True
 
-        if re.search(r"\b\d{2,5}\s*(zł|pln|usd|eur|\$|€)\b", normalized):
+        # liczba + waluta
+        if re.search(r"\b\d{2,5}\s*(zl|pln|usd|eur|\$|€)\b", normalized):
             return True
 
+        # 3 cyfry rozdzielone spacją (1 5 0)
         if re.search(r"\b\d\s\d\s\d\b", normalized):
             return True
 
@@ -899,4 +925,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
