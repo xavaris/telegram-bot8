@@ -101,6 +101,7 @@ def get_product_emoji(name: str) -> str:
     normalized = normalize_text(name)
 
     product_groups = {
+
         "💜": [
             "pix", "pixy", "piksy", "piksi",
             "eksta", "exta", "extasy", "ecstasy",
@@ -124,7 +125,7 @@ def get_product_emoji(name: str) -> str:
 
         "🌿": [
             "weed", "buch", "jazz", "jaaz",
-            "trawa", "ziolo", "zielone", "buszek"
+            "trawa", "ziolo", "zielone", "buszek", "haze", "cali"
         ],
 
         "🍫": [
@@ -161,6 +162,11 @@ def get_product_emoji(name: str) -> str:
 
         "✨": [
             "blinker", "blink", "blinkery"
+        ],
+
+        "💳": [
+            "sim", "starter", "karta sim", "karty sim",
+            "starter sim", "esim", "SIMKI"
         ]
     }
 
@@ -520,6 +526,83 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ask_product_count(query)
         return
 
+
+        # ================= SIM NETWORK SELECTION =================
+    if query.data.startswith("NET_"):
+
+        if not context.user_data.get("selecting_sim_network"):
+            return
+
+        network_map = {
+            "NET_PLAY": "🟣 Play",
+            "NET_ORANGE": "🟠 Orange",
+            "NET_PLUS": "🟢 Plus",
+            "NET_TMOBILE": "🔴 T-Mobile",
+            "NET_HEYAH": "🔺 Heyah",
+            "NET_NJU": "🟧 Nju Mobile",
+            "NET_VIRGIN": "🟣 Virgin Mobile",
+            "NET_LYCA": "🔵 LycaMobile",
+            "NET_VIKINGS": "⚔️ Mobile Vikings",
+            "NET_PREMIUM": "⭐ Premium Mobile",
+            "NET_A2": "🅰️ A2Mobile",
+            "NET_FAKT": "📰 Fakt Mobile",
+            "NET_BIEDRONKA": "🛒 Biedronka Mobile"
+        }
+
+        if query.data == "NET_DONE":
+
+            selected = context.user_data.get("selected_networks", [])
+
+            if not selected:
+                await query.answer("Wybierz przynajmniej 1 sieć ❗", show_alert=True)
+                return
+
+            product_name = context.user_data.get("pending_sim_product")
+            network_text = " | ".join(selected)
+
+            full_product = f"{product_name} | {network_text}"
+            context.user_data["wts_products"].append(full_product)
+
+            context.user_data.pop("selecting_sim_network")
+            context.user_data.pop("pending_sim_product")
+            context.user_data.pop("selected_networks")
+
+            if len(context.user_data["wts_products"]) < context.user_data["wts_total"]:
+                await query.edit_message_text(
+                    f"<b>PODAJ PRODUKT {len(context.user_data['wts_products'])+1}:</b>",
+                    parse_mode="HTML"
+                )
+                return
+
+            keyboard = [
+                [InlineKeyboardButton("GDY", callback_data="CITY_GDY")],
+                [InlineKeyboardButton("GDA", callback_data="CITY_GDA")],
+                [InlineKeyboardButton("SOP", callback_data="CITY_SOP")]
+            ]
+
+            await query.edit_message_text(
+                "<b>WYBIERZ MIASTO:</b>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+
+        else:
+            network = network_map.get(query.data)
+            if not network:
+                return
+
+            selected = context.user_data.get("selected_networks", [])
+
+            if network in selected:
+                selected.remove(network)
+                await query.answer("Usunięto ❌")
+            else:
+                selected.append(network)
+                await query.answer("Dodano ✅")
+
+            return
+            
     # ================= WTS =================
     if query.data == "WTS":
         if not user.username:
@@ -615,10 +698,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         return
 
-    # WTS PRODUCTS
+      # ================= WTS PRODUCTS =================
     if "wts_total" in context.user_data:
+
         if contains_price_hardcore(text):
             await update.message.reply_text("<b>❌ ZAKAZ PODAWANIA CEN.</b>", parse_mode="HTML")
+            return
+
+        # 🔥 JEŚLI TO SIM → WYBÓR SIECI
+        if get_product_emoji(text) == "💳":
+
+            context.user_data["selecting_sim_network"] = True
+            context.user_data["pending_sim_product"] = text
+            context.user_data["selected_networks"] = []
+
+            keyboard = [
+                [
+                    InlineKeyboardButton("🟣 Play", callback_data="NET_PLAY"),
+                    InlineKeyboardButton("🟠 Orange", callback_data="NET_ORANGE")
+                ],
+                [
+                    InlineKeyboardButton("🟢 Plus", callback_data="NET_PLUS"),
+                    InlineKeyboardButton("🔴 T-Mobile", callback_data="NET_TMOBILE")
+                ],
+                [
+                    InlineKeyboardButton("🔺 Heyah", callback_data="NET_HEYAH"),
+                    InlineKeyboardButton("🟧 Nju", callback_data="NET_NJU")
+                ],
+                [
+                    InlineKeyboardButton("🟣 Virgin", callback_data="NET_VIRGIN"),
+                    InlineKeyboardButton("🔵 Lyca", callback_data="NET_LYCA")
+                ],
+                [
+                    InlineKeyboardButton("⚔️ Vikings", callback_data="NET_VIKINGS"),
+                    InlineKeyboardButton("⭐ Premium", callback_data="NET_PREMIUM")
+                ],
+                [
+                    InlineKeyboardButton("🅰️ A2Mobile", callback_data="NET_A2"),
+                    InlineKeyboardButton("📰 Fakt Mobile", callback_data="NET_FAKT")
+                ],
+                [
+                    InlineKeyboardButton("🛒 Biedronka Mobile", callback_data="NET_BIEDRONKA")
+                ],
+                [
+                    InlineKeyboardButton("➡️ DALEJ", callback_data="NET_DONE")
+                ]
+            ]
+
+            await update.message.reply_text(
+                "<b>📡 WYBIERZ SIECI (MIN. 1):</b>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
             return
 
         context.user_data["wts_products"].append(text)
@@ -768,3 +899,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
