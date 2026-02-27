@@ -897,7 +897,9 @@ async def publish(update, context):
     city = city_map.get(context.user_data.get("city"))
     options_raw = context.user_data.get("options", [])
 
-    # ================= WTS =================
+    # =====================================================
+    # ====================== WTS ==========================
+    # =====================================================
     if "wts_products" in context.user_data:
 
         vendor = None
@@ -934,11 +936,14 @@ async def publish(update, context):
 
         reply_markup = None
 
-    # ================= WTB / WTT =================
+    # =====================================================
+    # ==================== WTB / WTT ======================
+    # =====================================================
     else:
 
         content = smart_mask_caps(context.user_data["content"])
         title = context.user_data["type"]
+
         topic = WTB_TOPIC if title == "WTB" else WTT_TOPIC
 
         hashtags = []
@@ -957,7 +962,7 @@ async def publish(update, context):
 
         hashtag_line = " ".join(hashtags)
 
-        # 🔥 KONTAKT ZAWSZE DO AUTORA
+        # 🔥 KONTAKT DO AUTORA
         if user.username:
             user_display = f"@{user.username}"
             contact_url = f"https://t.me/{user.username}"
@@ -979,69 +984,9 @@ async def publish(update, context):
             [InlineKeyboardButton("📩 KONTAKT", url=contact_url)]
         ])
 
-    msg = await context.bot.send_photo(
-        chat_id=GROUP_ID,
-        message_thread_id=topic,
-        photo=LOGO_URL,
-        caption=caption,
-        parse_mode="HTML",
-        reply_markup=reply_markup
-    )
-
-    async def delete_later(ctx):
-        try:
-            await ctx.bot.delete_message(GROUP_ID, msg.message_id)
-        except:
-            pass
-
-    context.application.job_queue.run_once(delete_later, 172800)
-
-    context.user_data.clear()
-    
-    # ================= WTB / WTT =================
-    else:
-
-        content = smart_mask_caps(context.user_data["content"])
-        title = context.user_data["type"]
-        topic = WTB_TOPIC if title == "WTB" else WTT_TOPIC
-
-        hashtags = []
-
-        if city:
-            hashtags.append(city)
-
-        if title == "WTB":
-            hashtags.append("#KUPIE")
-        else:
-            hashtags.append("#WYMIANA")
-
-        for o in options_raw:
-            if o in option_map:
-                hashtags.append(option_map[o])
-
-        hashtag_line = " ".join(hashtags)
-
-        # 🔥 WYŚWIETLANIE USERNAME + STABILNY KONTAKT
-        if user.username:
-            user_display = f"@{user.username}"
-            contact_url = f"https://t.me/{user.username}"
-        else:
-            user_display = f"ID: {user.id}"
-            contact_url = f"https://t.me/{BOT_USERNAME}?start=contact_{user.id}"
-
-        caption = (
-            f"<b>🚨🚨 {title} ALERT 🚨🚨</b>\n\n"
-            f"<b>👤 {user_display}</b>\n\n"
-            f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
-            f"<b>🔥 {content} 🔥</b>\n\n"
-            f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
-            f"{hashtag_line}\n\n"
-            f"<b>⚡ MARKETPLACE</b>"
-        )
-
-        reply_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📩 KONTAKT", url=contact_url)]
-        ])
+    # =====================================================
+    # ================== WYSYŁKA ==========================
+    # =====================================================
 
     msg = await context.bot.send_photo(
         chat_id=GROUP_ID,
@@ -1083,6 +1028,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
