@@ -580,11 +580,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await publish(update, context)
         return
 
-    if query.data == "NEW_WTS":
+       if query.data == "NEW_WTS":
+
+        # 🔒 WTS wymaga username (vendor system)
+        if not user.username:
+            await query.edit_message_text(
+                "<b>❌ Aby publikować WTS musisz ustawić @username w ustawieniach Telegram.</b>",
+                parse_mode="HTML"
+            )
+            return
+
         context.user_data["vendor"] = get_vendor(user.username.lower())
         await ask_product_count(query)
         return
-
 
         # ================= SIM NETWORK SELECTION =================
     if query.data.startswith("NET_"):
@@ -868,7 +876,8 @@ async def ask_product_count(query):
 
 # ================= PUBLISH =================
 async def publish(update, context):
-    user = update.callback_query.from_user
+
+    user = update.effective_user  # 🔥 bezpieczniejsze niż callback_query.from_user
 
     city_map = {
         "CITY_GDY": "#GDY",
@@ -887,7 +896,10 @@ async def publish(update, context):
     # ================= WTS =================
     if "wts_products" in context.user_data:
 
-        vendor = get_vendor(user.username.lower()) if user.username else None
+        # 🔥 zabezpieczenie username
+        vendor = None
+        if user.username:
+            vendor = get_vendor(user.username.lower())
 
         content = "\n".join(
             f"{get_product_emoji(p)} {smart_mask_caps(p)}"
@@ -914,9 +926,7 @@ async def publish(update, context):
             content,
             vendor,
             city,
-            [
-                option_map[o] for o in options_raw if o in option_map
-            ]
+            [option_map[o] for o in options_raw if o in option_map]
         )
 
         reply_markup = None
@@ -944,13 +954,13 @@ async def publish(update, context):
 
         hashtag_line = " ".join(hashtags)
 
-        # 🔥 WYŚWIETLANIE USERNAME
+        # 🔥 WYŚWIETLANIE USERNAME + STABILNY KONTAKT
         if user.username:
             user_display = f"@{user.username}"
             contact_url = f"https://t.me/{user.username}"
         else:
             user_display = f"ID: {user.id}"
-            contact_url = f"tg://user?id={user.id}"
+            contact_url = f"https://t.me/{BOT_USERNAME}?start=contact_{user.id}"
 
         caption = (
             f"<b>🚨🚨 {title} ALERT 🚨🚨</b>\n\n"
@@ -966,7 +976,7 @@ async def publish(update, context):
             [InlineKeyboardButton("📩 KONTAKT", url=contact_url)]
         ])
 
-    msg = await update.get_bot().send_photo(
+    msg = await context.bot.send_photo(
         chat_id=GROUP_ID,
         message_thread_id=topic,
         photo=LOGO_URL,
@@ -1006,6 +1016,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
