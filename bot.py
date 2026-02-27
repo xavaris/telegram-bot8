@@ -99,66 +99,116 @@ def normalize_text(text: str) -> str:
 def get_product_emoji(name: str) -> str:
     normalized = normalize_text(name)
 
-product_groups = {
+def get_product_emoji(name: str) -> str:
+    normalized = normalize_text(name)
 
-    # ===== MDMA PIGUŁY =====
-    "💜": [
-        "pix", "pixy", "piksy", "piksi",
-        "eksta", "exta", "extasy", "ecstasy",
-        "mitsubishi", "lego", "superman", "rolls",
-        "pharaoh", "tesla", "redbull", "bluepunisher",
-        "delfin", "domino", "batman",
-        "tabletka mdma", "mdma tabs"
-    ],
+    product_groups = {
 
-    # ===== SYNTH KRYSZTAŁ =====
-    "💎": [
-        "mewa", "3cmc", "4mmc", "cmc", "mmc",
-        "kryx", "krysztal", "kryształ",
-        "crystal", "ice",
-        "mefedron", "mefa", "mef",
-        "mdma crystal", "mdma krysztal"
-    ],
+        # ===== MDMA PIGUŁY =====
+        "💜": [
+            "pix", "pixy", "piksy", "piksi",
+            "eksta", "exta", "extasy", "ecstasy",
+            "mitsubishi", "lego", "superman", "rolls",
+            "pharaoh", "tesla", "bluepunisher"
+        ],
 
-    # ===== BIAŁE / KOKOS / PROSZEK =====
-    "❄️": [
-        "koks", "kokos", "koko",
-        "koperta", "coke", "cocaina", "kokaina",
-        "biała", "biala", "biały", "bialy",
-        "sniff", "sznyt", "sznyty",
-        "snow", "line", "kreska", "kreski"
-    ],
+        # ===== SYNTH KRYSZTAŁ =====
+        "💎": [
+            "mewa", "3cmc", "4mmc", "cmc", "mmc",
+            "kryx", "krysztal", "kryształ",
+            "crystal", "ice",
+            "mefedron", "mefa", "mef",
+            "mdma crystal", "mdma krysztal"
+        ],
 
-    "🌿": [
-        "weed", "buch", "jazz", "jaaz",
-        "trawa", "ziolo", "zielone", "buszek",
-        "top", "joint", "blant"
-    ],
+        # ===== BIAŁE / KOKOS =====
+        "❄️": [
+            "koks", "kokos", "koko",
+            "koperta", "coke", "cocaina", "kokaina",
+            "biała", "biala", "biały", "bialy",
+            "sniff", "kreska", "kreski"
+        ],
 
-    "🍫": [
-        "hasz", "haszysz", "czekolada",
-        "haszyk", "kostka"
-    ],
+        "🌿": [
+            "weed", "buch", "jazz", "jaaz",
+            "trawa", "ziolo", "zielone", "buszek"
+        ],
 
-    "💊": [
-        # pharma
-        "xanax", "alpra", "alprazolam",
-        "medikinet", "clony", "clonozepan",
-        "clonazepam", "rivotril", "diazepam",
-        "oxycodon", "oxy", "tramal", "tramadol",
-        "pregabalina", "liryca",
+        "🍫": [
+            "hasz", "haszysz", "czekolada", "haszyk"
+        ],
 
-        # ogólne tabsy
-        "tabs", "tabsy", "tabletki",
-        "pigula", "piguły", "pigułki"
-    ],
+        "💊": [
+            "xanax", "alpra", "alprazolam",
+            "clonazepam", "rivotril", "diazepam",
+            "tabs", "tabsy", "tabletki",
+            "pigula", "piguły", "pigułki"
+        ],
 
-    "💨": ["vape", "vap", "liquid", "liq", "pod", "salt", "jednorazowka"],
+        "💨": ["vape", "vap", "liquid", "liq", "pod", "salt"],
 
-    "🚬": ["epapieros", "e-papieros", "epapierosy", "e-papierosy"],
+        "🚬": ["epapieros", "e-papieros", "epapierosy", "e-papierosy"],
 
-    "✨": ["blinker", "blink", "blinkery"]
-}
+        "✨": ["blinker", "blink", "blinkery"]
+    }
+
+    for emoji, keywords in product_groups.items():
+        for key in keywords:
+            if key in normalized:
+                return emoji
+
+    return "📦"def get_product_emoji(name: str) -> str:
+    normalized = normalize_text(name)
+
+    product_groups = {
+
+        # ===== MDMA PIGUŁY =====
+        "💜": [
+            "pix", "pixy", "piksy", "piksi",
+            "eksta", "exta", "extasy", "ecstasy",
+            "mitsubishi", "lego", "superman", "rolls",
+            "pharaoh", "tesla", "bluepunisher"
+        ],
+
+        # ===== SYNTH KRYSZTAŁ =====
+        "💎": [
+            "mewa", "3cmc", "4mmc", "cmc", "mmc",
+            "kryx", "krysztal", "kryształ",
+            "crystal", "ice",
+            "mefedron", "mefa", "mef",
+            "mdma crystal", "mdma krysztal"
+        ],
+
+        # ===== BIAŁE / KOKOS =====
+        "❄️": [
+            "koks", "kokos", "koko",
+            "koperta", "coke", "cocaina", "kokaina",
+            "biała", "biala", "biały", "bialy",
+            "sniff", "kreska", "kreski"
+        ],
+
+        "🌿": [
+            "weed", "buch", "jazz", "jaaz",
+            "trawa", "ziolo", "zielone", "buszek"
+        ],
+
+        "🍫": [
+            "hasz", "haszysz", "czekolada", "haszyk"
+        ],
+
+        "💊": [
+            "xanax", "alpra", "alprazolam",
+            "clonazepam", "rivotril", "diazepam",
+            "tabs", "tabsy", "tabletki",
+            "pigula", "piguły", "pigułki"
+        ],
+
+        "💨": ["vape", "vap", "liquid", "liq", "pod", "salt"],
+
+        "🚬": ["epapieros", "e-papieros", "epapierosy", "e-papierosy"],
+
+        "✨": ["blinker", "blink", "blinkery"]
+    }
 
     for emoji, keywords in product_groups.items():
         for key in keywords:
@@ -708,4 +758,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
