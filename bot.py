@@ -96,8 +96,6 @@ def normalize_text(text: str) -> str:
     return text
 
 # ================= ULTRA PRODUCT DETECTION =================
-def get_product_emoji(name: str) -> str:
-    normalized = normalize_text(name)
 
 def get_product_emoji(name: str) -> str:
     normalized = normalize_text(name)
@@ -758,5 +756,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
