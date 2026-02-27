@@ -289,10 +289,20 @@ def premium_template(title, username, content, vendor_data, city, options):
 # ================= AUTO SYSTEM =================
 async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
 
+    # ===== WTS =====
     keyboard_wts = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📞 NAPISZ DO ADMINA", url="https://t.me/burwusovy")],
-        [InlineKeyboardButton("💼 DODAJ OGŁOSZENIE",
-                              url=f"https://t.me/{BOT_USERNAME}?start=1")]
+        [
+            InlineKeyboardButton(
+                "📞 NAPISZ DO ADMINA",
+                url=f"https://t.me/{os.getenv('ADMIN_USERNAME')}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "💼 DODAJ OGŁOSZENIE",
+                url=f"https://t.me/{BOT_USERNAME}?start=wts"
+            )
+        ]
     ])
 
     await context.bot.send_message(
@@ -303,10 +313,56 @@ async def auto_messages(context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard_wts
     )
 
+    # ===== WTB =====
+    keyboard_wtb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "🛒 DODAJ OGŁOSZENIE",
+                url=f"https://t.me/{BOT_USERNAME}?start=wtb"
+            )
+        ]
+    ])
+
+    await context.bot.send_message(
+        chat_id=GROUP_ID,
+        message_thread_id=WTB_TOPIC,
+        text="<b>🔎 CHCESZ COŚ KUPIĆ?</b>\nDodaj ogłoszenie poniżej 👇",
+        parse_mode="HTML",
+        reply_markup=keyboard_wtb
+    )
+
+    # ===== WTT =====
+    keyboard_wtt = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "🔁 DODAJ OGŁOSZENIE",
+                url=f"https://t.me/{BOT_USERNAME}?start=wtt"
+            )
+        ]
+    ])
+
+    await context.bot.send_message(
+        chat_id=GROUP_ID,
+        message_thread_id=WTT_TOPIC,
+        text="<b>🔁 CHCESZ COŚ WYMIENIĆ?</b>\nDodaj ogłoszenie poniżej 👇",
+        parse_mode="HTML",
+        reply_markup=keyboard_wtt
+    )
+
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
+
+    args = context.args
+
+    if args:
+        if args[0] == "wts":
+            context.user_data["type"] = "WTS"
+        elif args[0] == "wtb":
+            context.user_data["type"] = "WTB"
+        elif args[0] == "wtt":
+            context.user_data["type"] = "WTT"
 
     keyboard = [[
         InlineKeyboardButton("🛒 WTB", callback_data="WTB"),
@@ -705,16 +761,10 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     if app.job_queue:
-        app.job_queue.run_repeating(auto_messages, interval=43200, first=60)
+        app.job_queue.run_repeating(auto_messages, interval=21600, first=60)
 
     app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
