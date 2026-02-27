@@ -746,9 +746,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= WTB / WTT =================
     if query.data in ["WTB", "WTT"]:
+
+        if not user.username:
+            await query.edit_message_text(
+                "<b>❌ Aby dodać ogłoszenie musisz ustawić @username w Telegramie.</b>\n\n"
+                "Ustaw username → wróć i spróbuj ponownie.",
+                parse_mode="HTML"
+            )
+            return
+
         context.user_data["type"] = query.data
         await query.edit_message_text("<b>NAPISZ TREŚĆ:</b>", parse_mode="HTML")
         return
+
         # ================= MESSAGE HANDLER =================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
@@ -883,6 +893,14 @@ async def publish(update, context):
 
     user = update.effective_user
 
+    # 🔒 ZAWSZE wymagamy username
+    if not user.username:
+        await user.send_message(
+            "<b>❌ Musisz ustawić @username aby publikować ogłoszenia.</b>",
+            parse_mode="HTML"
+        )
+        return
+
     city_map = {
         "CITY_GDY": "#GDY",
         "CITY_GDA": "#GDA",
@@ -897,14 +915,8 @@ async def publish(update, context):
     city = city_map.get(context.user_data.get("city"))
     options_raw = context.user_data.get("options", [])
 
-    # =====================================================
-    # ====================== WTS ==========================
-    # =====================================================
+    # ================= WTS =================
     if "wts_products" in context.user_data:
-
-        vendor = None
-        if user.username:
-            vendor = get_vendor(user.username.lower())
 
         content = "\n".join(
             f"{get_product_emoji(p)} {smart_mask_caps(p)}"
@@ -915,30 +927,20 @@ async def publish(update, context):
         topic = WTS_TOPIC
 
         set_last_post(user.id)
-
-        if user.username:
-            increment_posts(user.username.lower())
-
-        last_ads[user.id] = {
-            "products": context.user_data.get("wts_products"),
-            "city": context.user_data.get("city"),
-            "options": context.user_data.get("options")
-        }
+        increment_posts(user.username.lower())
 
         caption = premium_template(
             title,
-            f"@{user.username}".upper() if user.username else f"ID:{user.id}",
+            f"@{user.username}",
             content,
-            vendor,
+            get_vendor(user.username.lower()),
             city,
             [option_map[o] for o in options_raw if o in option_map]
         )
 
         reply_markup = None
 
-    # =====================================================
-    # ==================== WTB / WTT ======================
-    # =====================================================
+    # ================= WTB / WTT =================
     else:
 
         content = smart_mask_caps(context.user_data["content"])
@@ -962,26 +964,9 @@ async def publish(update, context):
 
         hashtag_line = " ".join(hashtags)
 
-        # 🔥 NORMALNY CHAT jeśli ma username
-        if user.username:
-            user_display = f"@{user.username}"
-            reply_markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📩 KONTAKT", url=f"https://t.me/{user.username}")]
-            ])
-        else:
-            # 🔥 Jeśli brak username – używamy tg://user ale BEZ ryzyka crasha
-            user_display = f"ID: {user.id}"
-
-            try:
-                reply_markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📩 KONTAKT", url=f"tg://user?id={user.id}")]
-                ])
-            except:
-                reply_markup = None
-
         caption = (
             f"<b>🚨🚨 {title} ALERT 🚨🚨</b>\n\n"
-            f"<b>👤 {user_display}</b>\n\n"
+            f"<b>👤 @{user.username}</b>\n\n"
             f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
             f"<b>🔥 {content} 🔥</b>\n\n"
             f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
@@ -989,28 +974,19 @@ async def publish(update, context):
             f"<b>⚡ MARKETPLACE</b>"
         )
 
-    # =====================================================
-    # ================== WYSYŁKA ==========================
-    # =====================================================
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📩 KONTAKT", url=f"https://t.me/{user.username}")]
+        ])
 
-    try:
-        msg = await context.bot.send_photo(
-            chat_id=GROUP_ID,
-            message_thread_id=topic,
-            photo=LOGO_URL,
-            caption=caption,
-            parse_mode="HTML",
-            reply_markup=reply_markup
-        )
-    except:
-        # jeśli przycisk wywali błąd → publikujemy bez przycisku
-        msg = await context.bot.send_photo(
-            chat_id=GROUP_ID,
-            message_thread_id=topic,
-            photo=LOGO_URL,
-            caption=caption,
-            parse_mode="HTML"
-        )
+    # ================= WYSYŁKA =================
+    msg = await context.bot.send_photo(
+        chat_id=GROUP_ID,
+        message_thread_id=topic,
+        photo=LOGO_URL,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
 
     async def delete_later(ctx):
         try:
@@ -1021,6 +997,12 @@ async def publish(update, context):
     context.application.job_queue.run_once(delete_later, 172800)
 
     context.user_data.clear()
+
+    # ✅ POTWIERDZENIE
+    await user.send_message(
+        "<b>✅ OGŁOSZENIE OPUBLIKOWANE</b>",
+        parse_mode="HTML"
+    )
     
     
 # ================= MAIN =================
@@ -1044,6 +1026,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
