@@ -95,139 +95,172 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"[^a-z0-9]", "", text)
     return text
 
-# ================= ULTRA PRODUCT DETECTION =================
+product_groups = {
 
-def get_product_emoji(name: str) -> str:
-    normalized = normalize_text(name)
+    # 🇵🇱 AMFETAMINA (POLSKA)
+    "🇵🇱": [
+        "feta", "amfa", "amfetamina",
+        "polak",
+        "krajowka", "krajowa", "krajuwa"
+    ],
 
-    product_groups = {
+    # 💜 EKSTAZY
+    "💜": [
+        "pix", "pixy", "piksy", "piksi",
+        "eksta", "exta", "extasy", "ecstasy",
+        "mitsubishi", "lego", "superman",
+        "rolls", "pharaoh", "tesla", "bluepunisher"
+    ],
 
-        "💜": [
-            "pix", "pixy", "piksy", "piksi",
-            "eksta", "exta", "extasy", "ecstasy",
-            "mitsubishi", "lego", "superman", "rolls",
-            "pharaoh", "tesla", "bluepunisher"
-        ],
+    # 💎 MEPH / CMC
+    "💎": [
+        "mewa", "3cmc", "4mmc", "cmc", "mmc",
+        "kryx", "krysztal", "crystal", "ice",
+        "mefedron", "mefa", "mef",
+        "kamien", "bezwonny"
+    ],
 
-        "💎": [
-            "mewa", "3cmc", "4mmc", "cmc", "mmc",
-            "kryx", "krysztal", "kryształ",
-            "crystal", "ice",
-            "mefedron", "mefa", "mef", "kamien", "kamień", "bezwonny"
-        ],
+    # ❄️ KOKAINA
+    "❄️": [
+        "koks", "kokos", "koko",
+        "coke", "cocaina", "kokaina",
+        "biala", "bialy",
+        "sniff", "kreska", "kreski"
+    ],
 
-        "❄️": [
-            "koks", "kokos", "koko",
-            "koperta", "coke", "cocaina", "kokaina",
-            "biała", "biala", "biały", "bialy",
-            "sniff", "kreska", "kreski"
-        ],
+    # 🌿 WEED
+    "🌿": [
+        "weed", "buch", "jazz",
+        "trawa", "ziolo", "zielone",
+        "buszek", "haze", "cali", "w33d"
+    ],
 
-        "🌿": [
-            "weed", "buch", "jazz", "jaaz",
-            "trawa", "ziolo", "zielone", "buszek", "haze", "cali"
-        ],
+    # 🍫 HASZ
+    "🍫": [
+        "hasz", "haszysz", "czekolada", "haszyk"
+    ],
 
-        "🍫": [
-            "hasz", "haszysz", "czekolada", "haszyk"
-        ],
+    # 🌙 NASENNE
+    "🌙": [
+        "zolpidem", "stilnox",
+        "nasen", "sleep"
+    ],
 
-        "💊": [
-            "xanax", "alpra", "alprazolam",
-            "clonazepam", "rivotril", "diazepam",
-            "tabs", "tabsy", "tabletki",
-            "pigula", "piguły", "pigułki"
-        ],
+    # 💊 OPIOIDY
+    "💊": [
+        "dhc",
+        "kodeina", "codeine",
+        "opioid",
+        "oxy", "oxycodone"
+    ],
 
-        "💨": [
-            "vape", "vap", "liquid", "liq",
-            "pod", "salt", "jednorazowka"
-        ],
+    # 💪 STERYDY
+    "💪": [
+        "testosteron", "test", "enan",
+        "prop", "tren", "deca",
+        "bold", "winstrol",
+        "anavar", "oxandrolone",
+        "dianabol", "meta"
+    ],
 
-        "🛢": [
-            "cart", "cartridge", "kartridz",
-            "wkład", "wklad", "thc cart"
-        ],
+    # 🧠 KETAMINA
+    "🧠": [
+        "keta", "ketamina", "ket"
+    ],
 
-        "🧴": [
-            "perfumy", "perfum", "perfumka",
-            "dior", "chanel", "gucci",
-            "armani", "versace", "tom ford"
-        ],
+    # 🍄 GRZYBY
+    "🍄": [
+        "grzyby", "grzybki", "grzyb",
+        "lizy", "lysiczki"
+    ],
 
-        "🚬": [
-            "epapieros", "e-papieros",
-            "epapierosy", "e-papierosy"
-        ],
+    # 💨 VAPE
+    "💨": [
+        "vape", "vap", "liquid", "liq",
+        "pod", "salt", "jednorazowka"
+    ],
 
-        "✨": [
-            "blinker", "blink", "blinkery"
-        ],
+    # 🛢 CARTRIDGE
+    "🛢": [
+        "cart", "cartridge", "kartridz",
+        "wklad"
+    ],
 
-        "💳": [
-            "sim", "starter", "karta sim", "karty sim",
-            "starter sim", "esim", "SIMKI"
-        ]
-    }
+    # 🧴 PERFUMY
+    "🧴": [
+        "perfumy", "perfum", "perfumka",
+        "dior", "chanel", "gucci",
+        "armani", "versace", "tom ford"
+    ],
 
-    for emoji, keywords in product_groups.items():
-        for key in keywords:
-            if key in normalized:
-                return emoji
+    # 🚬 E-PAPIEROSY
+    "🚬": [
+        "epapieros", "epapierosy"
+    ],
 
-    return "📦"
+    # ✨ BLINKERY
+    "✨": [
+        "blinker", "blink", "blinkery"
+    ],
 
-# ================= ULTRA HARDCORE PRICE DETECTOR V2 =================
+    # 💳 KARTY SIM
+    "💳": [
+        "sim", "starter", "kartasim",
+        "startersim", "esim", "simki"
+    ]
+}
+# ================= ULTRA HARDCORE PRICE DETECTOR V3 =================
 def contains_price_hardcore(text: str) -> bool:
 
     lines = text.split("\n")
+
+    price_pattern_count = 0
 
     for line in lines:
 
         clean = reverse_leet(line.lower().strip())
         normalized = re.sub(r"[^a-z0-9\s\-:]", "", clean)
 
-        # =========================================
-        # 🔥 WYJĄTKI PRODUKTOWE (DOZWOLONE)
-        # =========================================
+        # ===== WYJĄTKI PRODUKTOWE =====
 
-        # 3cmc / 4mmc / 2cb itp
+        # 3cmc / 4mmc / 2cb
         if re.fullmatch(r"\d+(cmc|mmc|cb)", normalized):
             continue
 
-        # dawki np 250mg / 250 mg
+        # dawki 250mg / 250 mg
         if re.search(r"\b\d+\s*mg\b", normalized):
-            # jeśli brak drugiej liczby → OK
             if not re.search(r"\b\d+\s*mg\b.*\b\d{2,5}\b", normalized):
                 continue
 
-        # =========================================
-        # 🔴 MOCNE WYKRYWANIE CEN
-        # =========================================
+        # ===== WYKRYWANIE ILOŚĆ - CENA =====
 
-        # schemat: 1 - 50 / 2-100 / 1:50
+        # 1 - 50 / 2-100 / 5 - 200
         if re.search(r"\b\d+\s*[-:]\s*\d{2,5}\b", normalized):
-            return True
+            price_pattern_count += 1
 
-        # schemat: 1 50 / 2 100
+        # 1 50
         if re.search(r"\b\d+\s+\d{2,5}\b", normalized):
-            return True
+            price_pattern_count += 1
 
-        # gramatura + cena np 1g 50
+        # 1g 50
         if re.search(r"\b\d+\s*(g|ml|szt|tabs)\s+\d{2,5}\b", normalized):
-            return True
+            price_pattern_count += 1
 
-        # sama liczba 2-5 cyfr
+        # sama cena
         if re.fullmatch(r"\d{2,5}", normalized):
-            return True
+            price_pattern_count += 1
 
-        # liczba + waluta
+        # 200 zl
         if re.search(r"\b\d{2,5}\s*(zl|pln|usd|eur|\$|€)\b", normalized):
-            return True
+            price_pattern_count += 1
 
-        # 3 cyfry rozdzielone spacją (1 5 0)
+        # 1 5 0
         if re.search(r"\b\d\s\d\s\d\b", normalized):
-            return True
+            price_pattern_count += 1
+
+    # 🔥 Jeśli wykryto 2 lub więcej wzorców cenowych → blokada
+    if price_pattern_count >= 2:
+        return True
 
     return False
 
@@ -836,12 +869,11 @@ async def ask_product_count(query):
 # ================= PUBLISH =================
 async def publish(update, context):
     user = update.callback_query.from_user
-    vendor = get_vendor(user.username.lower()) if user.username else None
 
     city_map = {
         "CITY_GDY": "#GDY",
         "CITY_GDA": "#GDA",
-        "CITY_SOP": "#SOPT"
+        "CITY_SOP": "#SOP"
     }
 
     option_map = {
@@ -850,47 +882,95 @@ async def publish(update, context):
     }
 
     city = city_map.get(context.user_data.get("city"))
-    options = [
-        option_map[o] for o in context.user_data.get("options", [])
-        if o in option_map
-    ]
+    options_raw = context.user_data.get("options", [])
 
+    # ================= WTS =================
     if "wts_products" in context.user_data:
+
+        vendor = get_vendor(user.username.lower()) if user.username else None
+
         content = "\n".join(
             f"{get_product_emoji(p)} {smart_mask_caps(p)}"
             for p in context.user_data["wts_products"]
         )
+
         title = "WTS"
         topic = WTS_TOPIC
 
         set_last_post(user.id)
-        increment_posts(user.username.lower())
 
-        # ======= FAST POST SAVE (DODANE) =======
+        if user.username:
+            increment_posts(user.username.lower())
+
         last_ads[user.id] = {
             "products": context.user_data.get("wts_products"),
             "city": context.user_data.get("city"),
             "options": context.user_data.get("options")
         }
 
+        caption = premium_template(
+            title,
+            f"@{user.username}".upper() if user.username else "BRAK USERNAME",
+            content,
+            vendor,
+            city,
+            [
+                option_map[o] for o in options_raw if o in option_map
+            ]
+        )
+
+        reply_markup = None
+
+    # ================= WTB / WTT =================
     else:
+
         content = smart_mask_caps(context.user_data["content"])
         title = context.user_data["type"]
         topic = WTB_TOPIC if title == "WTB" else WTT_TOPIC
+
+        # ===== AUTOMATYCZNE HASHTAGI =====
+        hashtags = []
+
+        if city:
+            hashtags.append(city)
+
+        if title == "WTB":
+            hashtags.append("#KUPIE")
+        else:
+            hashtags.append("#WYMIANA")
+
+        if "OPT_DOLOT" in options_raw:
+            hashtags.append("#DOLOT")
+
+        if "OPT_UBER" in options_raw:
+            hashtags.append("#UBERPAKA")
+
+        hashtag_line = " ".join(hashtags)
+
+        # ===== NOWY WYRAŹNY UKŁAD =====
+        caption = (
+            f"<b>🚨🚨 {title} ALERT 🚨🚨</b>\n\n"
+            f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
+            f"<b>🔥 {content} 🔥</b>\n\n"
+            f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
+            f"{hashtag_line}\n\n"
+            f"<b>⚡ MARKETPLACE</b>"
+        )
+
+        # 🔥 KONTAKT ZAWSZE DO AUTORA (działa bez username)
+        contact_url = f"tg://user?id={user.id}"
+
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📩 KONTAKT", url=contact_url)]
+        ])
 
     msg = await update.get_bot().send_photo(
         chat_id=GROUP_ID,
         message_thread_id=topic,
         photo=LOGO_URL,
-        caption=premium_template(
-            title,
-            f"@{user.username}".upper(),
-            content,
-            vendor,
-            city,
-            options
-        ),
-        parse_mode="HTML"
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=reply_markup
     )
 
     async def delete_later(ctx):
@@ -902,7 +982,6 @@ async def publish(update, context):
     context.application.job_queue.run_once(delete_later, 172800)
 
     context.user_data.clear()
-
 
 # ================= MAIN =================
 def main():
@@ -925,5 +1004,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
