@@ -877,8 +877,8 @@ async def publish(update, context):
     }
 
     option_map = {
-        "OPT_DOLOT": "✈️ DOLOT",
-        "OPT_UBER": "🚗 UBER PAKA"
+        "OPT_DOLOT": "#DOLOT",
+        "OPT_UBER": "#UBERPAKA"
     }
 
     city = city_map.get(context.user_data.get("city"))
@@ -928,7 +928,6 @@ async def publish(update, context):
         title = context.user_data["type"]
         topic = WTB_TOPIC if title == "WTB" else WTT_TOPIC
 
-        # ===== AUTOMATYCZNE HASHTAGI =====
         hashtags = []
 
         if city:
@@ -939,26 +938,29 @@ async def publish(update, context):
         else:
             hashtags.append("#WYMIANA")
 
-        if "OPT_DOLOT" in options_raw:
-            hashtags.append("#DOLOT")
-
-        if "OPT_UBER" in options_raw:
-            hashtags.append("#UBERPAKA")
+        for o in options_raw:
+            if o in option_map:
+                hashtags.append(option_map[o])
 
         hashtag_line = " ".join(hashtags)
 
-        # ===== NOWY WYRAŹNY UKŁAD =====
+        # 🔥 WYŚWIETLANIE USERNAME
+        if user.username:
+            user_display = f"@{user.username}"
+            contact_url = f"https://t.me/{user.username}"
+        else:
+            user_display = f"ID: {user.id}"
+            contact_url = f"tg://user?id={user.id}"
+
         caption = (
             f"<b>🚨🚨 {title} ALERT 🚨🚨</b>\n\n"
+            f"<b>👤 {user_display}</b>\n\n"
             f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
             f"<b>🔥 {content} 🔥</b>\n\n"
             f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
             f"{hashtag_line}\n\n"
             f"<b>⚡ MARKETPLACE</b>"
         )
-
-        # 🔥 KONTAKT ZAWSZE DO AUTORA (działa bez username)
-        contact_url = f"tg://user?id={user.id}"
 
         reply_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("📩 KONTAKT", url=contact_url)]
@@ -982,7 +984,7 @@ async def publish(update, context):
     context.application.job_queue.run_once(delete_later, 172800)
 
     context.user_data.clear()
-
+    
 # ================= MAIN =================
 def main():
     app = Application.builder().token(TOKEN).build()
@@ -1004,6 +1006,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
