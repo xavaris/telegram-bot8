@@ -580,12 +580,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await publish(update, context)
         return
 
-       if query.data == "NEW_WTS":
+           if query.data == "NEW_WTS":
 
-        # 🔒 WTS wymaga username (vendor system)
         if not user.username:
             await query.edit_message_text(
-                "<b>❌ Aby publikować WTS musisz ustawić @username w ustawieniach Telegram.</b>",
+                "<b>❌ Aby publikować WTS musisz ustawić @username.</b>",
                 parse_mode="HTML"
             )
             return
@@ -1016,6 +1015,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
