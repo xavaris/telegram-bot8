@@ -927,7 +927,7 @@ async def publish(update, context):
 
         caption = premium_template(
             title,
-            f"@{user.username}".upper() if user.username else "BRAK USERNAME",
+            f"@{user.username}".upper() if user.username else f"ID:{user.id}",
             content,
             vendor,
             city,
@@ -962,13 +962,22 @@ async def publish(update, context):
 
         hashtag_line = " ".join(hashtags)
 
-        # 🔥 KONTAKT DO AUTORA
+        # 🔥 NORMALNY CHAT jeśli ma username
         if user.username:
             user_display = f"@{user.username}"
-            contact_url = f"https://t.me/{user.username}"
+            reply_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📩 KONTAKT", url=f"https://t.me/{user.username}")]
+            ])
         else:
+            # 🔥 Jeśli brak username – używamy tg://user ale BEZ ryzyka crasha
             user_display = f"ID: {user.id}"
-            contact_url = f"tg://user?id={user.id}"
+
+            try:
+                reply_markup = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📩 KONTAKT", url=f"tg://user?id={user.id}")]
+                ])
+            except:
+                reply_markup = None
 
         caption = (
             f"<b>🚨🚨 {title} ALERT 🚨🚨</b>\n\n"
@@ -980,22 +989,28 @@ async def publish(update, context):
             f"<b>⚡ MARKETPLACE</b>"
         )
 
-        reply_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📩 KONTAKT", url=contact_url)]
-        ])
-
     # =====================================================
     # ================== WYSYŁKA ==========================
     # =====================================================
 
-    msg = await context.bot.send_photo(
-        chat_id=GROUP_ID,
-        message_thread_id=topic,
-        photo=LOGO_URL,
-        caption=caption,
-        parse_mode="HTML",
-        reply_markup=reply_markup
-    )
+    try:
+        msg = await context.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=topic,
+            photo=LOGO_URL,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+    except:
+        # jeśli przycisk wywali błąd → publikujemy bez przycisku
+        msg = await context.bot.send_photo(
+            chat_id=GROUP_ID,
+            message_thread_id=topic,
+            photo=LOGO_URL,
+            caption=caption,
+            parse_mode="HTML"
+        )
 
     async def delete_later(ctx):
         try:
@@ -1006,6 +1021,7 @@ async def publish(update, context):
     context.application.job_queue.run_once(delete_later, 172800)
 
     context.user_data.clear()
+    
     
 # ================= MAIN =================
 def main():
@@ -1028,6 +1044,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
