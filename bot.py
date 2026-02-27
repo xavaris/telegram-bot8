@@ -566,7 +566,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ask_product_count(query)
         return
 
-        # ================= SIM NETWORK SELECTION =================
+    # ================= SIM NETWORK SELECTION =================
     if query.data.startswith("NET_"):
 
         if not context.user_data.get("selecting_sim_network"):
@@ -602,9 +602,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             full_product = f"{product_name} | {network_text}"
             context.user_data["wts_products"].append(full_product)
 
-            context.user_data.pop("selecting_sim_network")
-            context.user_data.pop("pending_sim_product")
-            context.user_data.pop("selected_networks")
+            context.user_data.pop("selecting_sim_network", None)
+            context.user_data.pop("pending_sim_product", None)
+            context.user_data.pop("selected_networks", None)
 
             if len(context.user_data["wts_products"]) < context.user_data["wts_total"]:
                 await query.edit_message_text(
@@ -641,7 +641,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("Dodano ✅")
 
             return
-            
+
     # ================= WTS =================
     if query.data == "WTS":
         if not user.username:
@@ -653,7 +653,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("<b>TYLKO VENDOR.</b>", parse_mode="HTML")
             return
 
-        if time.time() - get_last_post(user.id) < 6*60*60:
+        if time.time() - get_last_post(user.id) < 6 * 60 * 60:
             await query.edit_message_text("<b>COOLDOWN 6H.</b>", parse_mode="HTML")
             return
 
@@ -683,7 +683,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("<b>PODAJ PRODUKT 1:</b>", parse_mode="HTML")
         return
 
+    # ================= CITY SELECTION =================
     if query.data in ["CITY_GDY", "CITY_GDA", "CITY_SOP"]:
+        # Guard: nie pozwól wybierać miasta, jeśli nie ma aktywnego flow
+        has_wts_flow = "wts_total" in context.user_data or "wts_products" in context.user_data
+        has_text_flow = "type" in context.user_data and "content" in context.user_data
+
+        if not has_wts_flow and not has_text_flow:
+            await query.answer("To menu jest nieaktywne. Zacznij od /start.", show_alert=True)
+            return
+
         context.user_data["city"] = query.data
         context.user_data["options"] = []
         keyboard = [
@@ -700,15 +709,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data in ["OPT_DOLOT", "OPT_UBER"]:
+        # Guard: opcje tylko gdy jest aktywny flow
+        has_wts_flow = "wts_total" in context.user_data or "wts_products" in context.user_data
+        has_text_flow = "type" in context.user_data and "content" in context.user_data
+        if not has_wts_flow and not has_text_flow:
+            await query.answer("To menu jest nieaktywne. Zacznij od /start.", show_alert=True)
+            return
+
         if query.data not in context.user_data["options"]:
             context.user_data["options"].append(query.data)
         return
 
     if query.data == "OPT_BRAK":
+        # Guard: jw.
+        has_wts_flow = "wts_total" in context.user_data or "wts_products" in context.user_data
+        has_text_flow = "type" in context.user_data and "content" in context.user_data
+        if not has_wts_flow and not has_text_flow:
+            await query.answer("To menu jest nieaktywne. Zacznij od /start.", show_alert=True)
+            return
+
         context.user_data["options"] = []
         return
 
     if query.data == "OPT_DONE":
+        # Guard: publikuj tylko gdy mamy komplet danych
+        has_wts_flow = "wts_products" in context.user_data and bool(context.user_data.get("wts_products"))
+        has_text_flow = "type" in context.user_data and "content" in context.user_data
+
+        if not has_wts_flow and not has_text_flow:
+            await query.answer("Brak danych do publikacji. Zacznij od /start.", show_alert=True)
+            context.user_data.clear()
+            return
+
         await publish(update, context)
         return
 
@@ -867,7 +899,6 @@ async def ask_product_count(query):
 
 # ================= PUBLISH =================
 async def publish(update, context):
-
     user = update.effective_user
 
     # 🔒 ZAWSZE wymagamy username
@@ -876,6 +907,7 @@ async def publish(update, context):
             "<b>❌ Musisz ustawić @username aby publikować ogłoszenia.</b>",
             parse_mode="HTML"
         )
+        context.user_data.clear()
         return
 
     city_map = {
@@ -893,7 +925,7 @@ async def publish(update, context):
     options_raw = context.user_data.get("options", [])
 
     # ================= WTS =================
-    if "wts_products" in context.user_data:
+    if "wts_products" in context.user_data and context.user_data.get("wts_products"):
 
         content = "\n".join(
             f"{get_product_emoji(p)} {smart_mask_caps(p)}"
@@ -919,8 +951,25 @@ async def publish(update, context):
 
     # ================= WTB / WTT =================
     else:
+        # Guard: jeśli to nie WTS, musimy mieć type + content
+        if "type" not in context.user_data or "content" not in context.user_data:
+            await user.send_message(
+                "<b>❌ Brak danych do publikacji. Zrób /start i przejdź proces od nowa.</b>",
+                parse_mode="HTML"
+            )
+            context.user_data.clear()
+            return
 
-        content = smart_mask_caps(context.user_data["content"])
+        raw_content = context.user_data.get("content")
+        if not raw_content:
+            await user.send_message(
+                "<b>❌ Pusta treść ogłoszenia. Zrób /start i spróbuj ponownie.</b>",
+                parse_mode="HTML"
+            )
+            context.user_data.clear()
+            return
+
+        content = smart_mask_caps(raw_content)
         title = context.user_data["type"]
 
         topic = WTB_TOPIC if title == "WTB" else WTT_TOPIC
@@ -981,7 +1030,6 @@ async def publish(update, context):
         parse_mode="HTML"
     )
     
-    
 # ================= MAIN =================
 def main():
     app = Application.builder().token(TOKEN).build()
@@ -1003,6 +1051,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
