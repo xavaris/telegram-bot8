@@ -759,7 +759,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("<b>NAPISZ TREŚĆ:</b>", parse_mode="HTML")
         return
 
-        # ================= MESSAGE HANDLER =================
+# ================= MESSAGE HANDLER =================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
@@ -779,15 +779,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         return
 
-      # ================= WTS PRODUCTS =================
+    # ================= WTS PRODUCTS =================
     if "wts_total" in context.user_data:
 
         if contains_price_hardcore(text):
-            await update.message.reply_text("<b>❌ ZAKAZ PODAWANIA CEN.</b>", parse_mode="HTML")
+            await update.message.reply_text(
+                "<b>❌ ZAKAZ PODAWANIA CEN.</b>",
+                parse_mode="HTML"
+            )
             return
 
+        # 🔥 BEZPIECZNE SPRAWDZENIE EMOJI PRODUKTU
+        try:
+            product_emoji = get_product_emoji(text)
+        except NameError:
+            product_emoji = "📦"
+
         # 🔥 JEŚLI TO SIM → WYBÓR SIECI
-        if get_product_emoji(text) == "💳":
+        if product_emoji == "💳":
 
             context.user_data["selecting_sim_network"] = True
             context.user_data["pending_sim_product"] = text
@@ -833,6 +842,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        # NORMALNY PRODUKT
         context.user_data["wts_products"].append(text)
 
         if len(context.user_data["wts_products"]) < context.user_data["wts_total"]:
@@ -855,7 +865,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # WTB / WTT TEXT
+    # ================= WTB / WTT TEXT =================
     if "type" in context.user_data:
         context.user_data["content"] = text
 
@@ -870,7 +880,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-
 
 # ================= ASK PRODUCT COUNT =================
 async def ask_product_count(query):
@@ -1026,6 +1035,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
