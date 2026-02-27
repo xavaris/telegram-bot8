@@ -60,7 +60,7 @@ CHAR_MAP = {
     "o": "0",
     "s": "$",
     "t": "τ",
-    "z": "2",
+    "z": "Ƶ",
     "u": "Ц",
     "c": "©"
 }
@@ -99,15 +99,66 @@ def normalize_text(text: str) -> str:
 def get_product_emoji(name: str) -> str:
     normalized = normalize_text(name)
 
-    product_groups = {
-        "💎": ["3cmc", "4mmc", "cmc", "mmc", "kryx", "krysztal", "ice", "mefedron"],
-        "🌿": ["weed", "buch", "jazz", "jaaz", "trawa", "ziolo", "zielone"],
-        "🍫": ["hasz", "haszysz", "czekolada", "haszyk"],
-        "❄️": ["koks", "kokos", "koko", "koperta", "coke", "cocaina", "kokaina"],
-        "💊": ["xanax", "alpra", "alprazolam", "medikinet",
-               "clony", "clonozepan", "clonazepam",
-               "rivotril", "diazepam"]
-    }
+product_groups = {
+
+    # ===== MDMA PIGUŁY =====
+    "💜": [
+        "pix", "pixy", "piksy", "piksi",
+        "eksta", "exta", "extasy", "ecstasy",
+        "mitsubishi", "lego", "superman", "rolls",
+        "pharaoh", "tesla", "redbull", "bluepunisher",
+        "delfin", "domino", "batman",
+        "tabletka mdma", "mdma tabs"
+    ],
+
+    # ===== SYNTH KRYSZTAŁ =====
+    "💎": [
+        "mewa", "3cmc", "4mmc", "cmc", "mmc",
+        "kryx", "krysztal", "kryształ",
+        "crystal", "ice",
+        "mefedron", "mefa", "mef",
+        "mdma crystal", "mdma krysztal"
+    ],
+
+    # ===== BIAŁE / KOKOS / PROSZEK =====
+    "❄️": [
+        "koks", "kokos", "koko",
+        "koperta", "coke", "cocaina", "kokaina",
+        "biała", "biala", "biały", "bialy",
+        "sniff", "sznyt", "sznyty",
+        "snow", "line", "kreska", "kreski"
+    ],
+
+    "🌿": [
+        "weed", "buch", "jazz", "jaaz",
+        "trawa", "ziolo", "zielone", "buszek",
+        "top", "joint", "blant"
+    ],
+
+    "🍫": [
+        "hasz", "haszysz", "czekolada",
+        "haszyk", "kostka"
+    ],
+
+    "💊": [
+        # pharma
+        "xanax", "alpra", "alprazolam",
+        "medikinet", "clony", "clonozepan",
+        "clonazepam", "rivotril", "diazepam",
+        "oxycodon", "oxy", "tramal", "tramadol",
+        "pregabalina", "liryca",
+
+        # ogólne tabsy
+        "tabs", "tabsy", "tabletki",
+        "pigula", "piguły", "pigułki"
+    ],
+
+    "💨": ["vape", "vap", "liquid", "liq", "pod", "salt", "jednorazowka"],
+
+    "🚬": ["epapieros", "e-papieros", "epapierosy", "e-papierosy"],
+
+    "✨": ["blinker", "blink", "blinkery"]
+}
 
     for emoji, keywords in product_groups.items():
         for key in keywords:
@@ -657,3 +708,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
