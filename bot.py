@@ -881,7 +881,7 @@ async def ask_product_count(query):
 # ================= PUBLISH =================
 async def publish(update, context):
 
-    user = update.effective_user  # 🔥 bezpieczniejsze niż callback_query.from_user
+    user = update.effective_user
 
     city_map = {
         "CITY_GDY": "#GDY",
@@ -900,7 +900,6 @@ async def publish(update, context):
     # ================= WTS =================
     if "wts_products" in context.user_data:
 
-        # 🔥 zabezpieczenie username
         vendor = None
         if user.username:
             vendor = get_vendor(user.username.lower())
@@ -935,6 +934,70 @@ async def publish(update, context):
 
         reply_markup = None
 
+    # ================= WTB / WTT =================
+    else:
+
+        content = smart_mask_caps(context.user_data["content"])
+        title = context.user_data["type"]
+        topic = WTB_TOPIC if title == "WTB" else WTT_TOPIC
+
+        hashtags = []
+
+        if city:
+            hashtags.append(city)
+
+        if title == "WTB":
+            hashtags.append("#KUPIE")
+        else:
+            hashtags.append("#WYMIANA")
+
+        for o in options_raw:
+            if o in option_map:
+                hashtags.append(option_map[o])
+
+        hashtag_line = " ".join(hashtags)
+
+        # 🔥 KONTAKT ZAWSZE DO AUTORA
+        if user.username:
+            user_display = f"@{user.username}"
+            contact_url = f"https://t.me/{user.username}"
+        else:
+            user_display = f"ID: {user.id}"
+            contact_url = f"tg://user?id={user.id}"
+
+        caption = (
+            f"<b>🚨🚨 {title} ALERT 🚨🚨</b>\n\n"
+            f"<b>👤 {user_display}</b>\n\n"
+            f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
+            f"<b>🔥 {content} 🔥</b>\n\n"
+            f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n\n"
+            f"{hashtag_line}\n\n"
+            f"<b>⚡ MARKETPLACE</b>"
+        )
+
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📩 KONTAKT", url=contact_url)]
+        ])
+
+    msg = await context.bot.send_photo(
+        chat_id=GROUP_ID,
+        message_thread_id=topic,
+        photo=LOGO_URL,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+    async def delete_later(ctx):
+        try:
+            await ctx.bot.delete_message(GROUP_ID, msg.message_id)
+        except:
+            pass
+
+    context.application.job_queue.run_once(delete_later, 172800)
+
+    context.user_data.clear()
+    
     # ================= WTB / WTT =================
     else:
 
@@ -1020,6 +1083,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
