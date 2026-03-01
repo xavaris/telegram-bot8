@@ -929,7 +929,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.job_queue.run_repeating(
             vip_auto_post,
             interval=21600,
-            first=21600,
+            first=5,
             name=f"vip_auto_{user.id}",
             data={
                 "username": username,
@@ -1590,6 +1590,7 @@ def main():
 if __name__ == "__main__":
     main()
     
+
 
 
 
