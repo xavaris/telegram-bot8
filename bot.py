@@ -24,7 +24,7 @@ GROUP_ID = int(os.getenv("GROUP_ID"))
 WTB_TOPIC = int(os.getenv("WTB"))
 WTS_TOPIC = int(os.getenv("WTS"))
 WTT_TOPIC = int(os.getenv("WTT"))
-VIP_TOPIC = 3  # 🔥 VIP VENDOR TOPIC ID
+VIP_TOPIC = 839  # 🔥 VIP VENDOR TOPIC ID
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 LOGO_URL = os.getenv("LOGO_URL")
 VIP_LOGO_URL = os.getenv("VIP_LOGO_URL")
@@ -1578,7 +1578,7 @@ def main():
     app.add_handler(CommandHandler("unsetvip", cmd_unsetvip))
 
     # CALLBACKS + MESSAGES
-    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(CallbackQueryHandler(button_handler, pattern=".*"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     if app.job_queue:
@@ -1590,6 +1590,7 @@ def main():
 if __name__ == "__main__":
     main()
     
+
 
 
 
