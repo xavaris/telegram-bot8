@@ -388,8 +388,8 @@ def vip_template(username, content, vendor_data, city, options, shop_link=None, 
             links_block += f'🛡 <b><a href="{legit_link}">GRUPA WERYFIKACYJNA</a></b>\n'
 
     return (
-        "✨👑 <b>GOLD VENDOR COLLECTION</b> 👑✨\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
+        "✨👑 <b>VIP VENDOR ELITE</b> 👑✨\n"
+        "━━━━━━━━━━━━\n\n"
 
         "🏛 <b>EXCLUSIVE VERIFIED SELLER</b>\n"
         f"🗓 <b>Member since:</b> {vendor_data[1]}\n"
@@ -399,9 +399,9 @@ def vip_template(username, content, vendor_data, city, options, shop_link=None, 
         f"📍 <b>{city}{option_text} | #3CITY</b>\n"
         f"{links_block}\n"
 
-        "━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━\n"
         f"{content}\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━\n\n"
 
         "💫 <b>Premium Quality</b>\n"
         "⚜️ <b>Discretion • Reputation • Prestige</b>"
@@ -1675,6 +1675,7 @@ def main():
 if __name__ == "__main__":
     main()
     
+
 
 
 
