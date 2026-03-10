@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS interest_counts (
 
 conn.commit()
 
-# ================= LEET MAP =================
+# ================= LEET + SEMANTIC MASK =================
+
 CHAR_MAP = {
     "a": "@",
     "e": "€",
@@ -123,23 +124,233 @@ REVERSE_LEET = {
     "©": "c"
 }
 
-def smart_mask_caps(text: str) -> str:
-    return "".join(CHAR_MAP.get(c.lower(), c) for c in text).upper()
 
+# ================= PRODUCT ALIASES =================
+PRODUCT_ALIASES = {
+
+    # 🐴 ket
+    "keta": "Książka Weterynaryjna",
+    "ketamina": "Książka Weterynaryjna",
+    "ketini": "Książka Weterynaryjna",
+
+    # 🕶 oxy
+    "oxy": "Okulary Kolekcjonerskie",
+    "dolory": "Okulary Kolekcjonerskie",
+    "okulary": "Okulary Kolekcjonerskie",
+
+    # 🍪 cookies
+    "cookies": "Ciastka Domowe",
+    "ciasteczka": "Ciastka Domowe",
+
+    # 📑 recepty
+    "recka": "Dokument Medyczny",
+    "recepty": "Dokument Medyczny",
+    "recepta": "Dokument Medyczny",
+    "recki": "Dokument Medyczny",
+
+    # 💤 nasenne
+    "nasen": "Poduszka Premium",
+    "zolpidem": "Poduszka Premium",
+    "relanium": "Poduszka Premium",
+
+    # 🍁 clon
+    "klony": "Liście Jesienne",
+    "clonozepan": "Liście Jesienne",
+    "clony": "Liście Jesienne",
+
+    # 🇵🇱 feta
+    "feta": "Ser Grecki",
+    "polak": "Produkt Lokalny",
+    "krajowa": "Produkt Lokalny",
+    "ryba": "Produkt Lokalny",
+    "feciura": "Produkt Lokalny",
+    "feciurka": "Produkt Lokalny",
+
+    # 💜 pix / exta
+    "pix": "Pastylki Kolekcjonerskie",
+    "pixy": "Pastylki Kolekcjonerskie",
+    "piksy": "Pastylki Kolekcjonerskie",
+    "piksi": "Pastylki Kolekcjonerskie",
+    "eksta": "Pastylki Kolekcjonerskie",
+    "exta": "Pastylki Kolekcjonerskie",
+    "extasy": "Pastylki Kolekcjonerskie",
+    "ecstasy": "Pastylki Kolekcjonerskie",
+    "mitsubishi": "Pastylka Kolekcjonerska",
+    "lego": "Pastylka Kolekcjonerska",
+    "superman": "Pastylka Kolekcjonerska",
+    "rolls": "Pastylka Kolekcjonerska",
+    "pharaoh": "Pastylka Kolekcjonerska",
+    "tesla": "Pastylka Kolekcjonerska",
+    "bluepunisher": "Pastylka Kolekcjonerska",
+
+    # 💎 kryształ / mef
+    "mewa": "Książka o Kamieniach",
+    "3cmc": "Książka o Kamieniach",
+    "4mmc": "Książka o Kamieniach",
+    "cmc": "Książka o Kamieniach",
+    "mmc": "Książka o Kamieniach",
+    "kryx": "Książka o Kamieniach",
+    "krysztal": "Książka o Kamieniach",
+    "kryształ": "Książka o Kamieniach",
+    "crystal": "Książka o Kamieniach",
+    "ice": "Książka o Kamieniach",
+    "mefedron": "Książka o Kamieniach",
+    "mefa": "Książka o Kamieniach",
+    "mef": "Książka o Kamieniach",
+    "kamien": "Książka o Kamieniach",
+    "kamień": "Książka o Kamieniach",
+    "bezwonny": "Książka o Kamieniach",
+    "m3ff": "Książka o Kamieniach",
+    "ewa": "Książka o Kamieniach",
+    "eufo": "Książka o Kamieniach",
+
+    # ❄️ koks
+    "koks": "Książka o Śniegu",
+    "kokos": "Książka o Śniegu",
+    "koko": "Książka o Śniegu",
+    "koperta": "Książka o Śniegu",
+    "coke": "Książka o Śniegu",
+    "cocaina": "Książka o Śniegu",
+    "kokaina": "Książka o Śniegu",
+    "biala": "Książka o Śniegu",
+    "biała": "Książka o Śniegu",
+    "bialy": "Książka o Śniegu",
+    "biały": "Książka o Śniegu",
+    "sniff": "Książka o Śniegu",
+    "kreska": "Książka o Śniegu",
+    "kreski": "Książka o Śniegu",
+    "cocos": "Książka o Śniegu",
+    "cocoos": "Książka o Śniegu",
+    "koper": "Książka o Śniegu",
+    "k0k0": "Książka o Śniegu",
+    "c0c0": "Książka o Śniegu",
+    "k0per": "Książka o Śniegu",
+    "chrzan": "Książka o Śniegu",
+
+    # 🌿 weed
+    "weed": "Książka o Drzewach",
+    "buch": "Książka o Drzewach",
+    "jazz": "Książka o Drzewach",
+    "jaaz": "Książka o Drzewach",
+    "trawa": "Książka o Drzewach",
+    "ziolo": "Książka o Drzewach",
+    "zielone": "Książka o Drzewach",
+    "buszek": "Książka o Drzewach",
+    "haze": "Książka o Drzewach",
+    "cali": "Książka o Drzewach",
+    "amnezia": "Książka o Drzewach",
+    "amnezja": "Książka o Drzewach",
+    "calli": "Książka o Drzewach",
+
+    # 🍫 hash
+    "hasz": "Książka o Czekoladzie",
+    "haszysz": "Książka o Czekoladzie",
+    "czekolada": "Książka o Czekoladzie",
+    "haszyk": "Książka o Czekoladzie",
+    "hash": "Książka o Czekoladzie",
+    "h4sh": "Książka o Czekoladzie",
+
+    # 💊 benzo
+    "xanax": "Kapsuły Kolekcjonerskie",
+    "alpra": "Kapsuły Kolekcjonerskie",
+    "alprazolam": "Kapsuły Kolekcjonerskie",
+    "clonazepam": "Kapsuły Kolekcjonerskie",
+    "rivotril": "Kapsuły Kolekcjonerskie",
+    "diazepam": "Kapsuły Kolekcjonerskie",
+    "tabs": "Kapsuły Kolekcjonerskie",
+    "tabsy": "Kapsuły Kolekcjonerskie",
+    "tabletki": "Kapsuły Kolekcjonerskie",
+    "pigula": "Kapsuły Kolekcjonerskie",
+    "piguły": "Kapsuły Kolekcjonerskie",
+    "pigułki": "Kapsuły Kolekcjonerskie",
+    "xani": "Kapsuły Kolekcjonerskie",
+    "xanii": "Kapsuły Kolekcjonerskie",
+    "alprox": "Kapsuły Kolekcjonerskie",
+
+    # 💨 vape
+    "vape": "Elektroniczny Inhalator",
+    "vap": "Elektroniczny Inhalator",
+    "liquid": "Elektroniczny Inhalator",
+    "liq": "Elektroniczny Inhalator",
+    "pod": "Elektroniczny Inhalator",
+    "salt": "Elektroniczny Inhalator",
+    "jednorazowka": "Elektroniczny Inhalator",
+
+    # 🛢 cart
+    "cart": "Kartridż Kolekcjonerski",
+    "cartridge": "Kartridż Kolekcjonerski",
+    "kartridz": "Kartridż Kolekcjonerski",
+    "wkład": "Kartridż Kolekcjonerski",
+    "wklad": "Kartridż Kolekcjonerski",
+
+    # 🧴 perfumy
+    "perfumy": "Perfumy",
+    "perfum": "Perfumy",
+    "perfumka": "Perfumy",
+    "dior": "Perfumy",
+    "chanel": "Perfumy",
+    "gucci": "Perfumy",
+    "armani": "Perfumy",
+    "versace": "Perfumy",
+    "tomford": "Perfumy",
+
+    # 💳 sim
+    "sim": "Karta Kolekcjonerska",
+    "starter": "Karta Kolekcjonerska",
+    "kartasim": "Karta Kolekcjonerska",
+    "starter sim": "Karta Kolekcjonerska",
+    "esim": "Karta Kolekcjonerska",
+    "simki": "Karta Kolekcjonerska",
+}
+
+
+# ================= REVERSE LEET =================
 def reverse_leet(text: str) -> str:
     result = ""
     for char in text.lower():
         result += REVERSE_LEET.get(char, char)
     return result
 
-def normalize_text(text: str) -> str:
+
+# ================= NORMALIZE =================
+def normalize_text(text: str):
+
     text = reverse_leet(text)
     text = text.lower()
+
     text = text.replace("ł", "l").replace("ó", "o").replace("ą", "a")
     text = text.replace("ę", "e").replace("ś", "s").replace("ż", "z")
     text = text.replace("ź", "z").replace("ć", "c").replace("ń", "n")
+
     text = re.sub(r"[^a-z0-9]", "", text)
+
     return text
+
+
+# ================= SEMANTIC MASK =================
+def semantic_mask(text: str):
+
+    normalized = normalize_text(text)
+
+    for key, alias in PRODUCT_ALIASES.items():
+        if key in normalized:
+            return alias
+
+    return text
+
+
+# ================= FINAL MASK =================
+def smart_mask_caps(text: str):
+
+    masked = semantic_mask(text)
+
+    if masked != text:
+        return masked.upper()
+
+    return "".join(
+        CHAR_MAP.get(c.lower(), c)
+        for c in text
+    ).upper()
 
 # ================= ULTRA PRODUCT DETECTION =================
 # ================= ULTRA PRODUCT DETECTION =================
@@ -1950,6 +2161,7 @@ def main():
 if __name__ == "__main__":
     main()
     
+
 
 
 
